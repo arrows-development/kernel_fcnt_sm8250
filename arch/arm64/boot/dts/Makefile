@@ -33,7 +33,9 @@ subdir-y += zte
 
 
 else
+ifneq ($(CONFIG_OF_IGNORE_QCOM_VENDOR_DTS),y)
         subdir-y += vendor
+endif
 endif
 
 subdir-y += fcnt

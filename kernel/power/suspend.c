@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * kernel/power/suspend.c - Suspend to RAM and standby functionality.
@@ -32,6 +35,9 @@
 #include <linux/compiler.h>
 #include <linux/moduleparam.h>
 #include <linux/wakeup_reason.h>
+
+#include <linux/switch_logout.h>
+#include <linux/rtc.h>
 
 #include "power.h"
 
@@ -445,6 +451,7 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 		log_suspend_abort_reason("Disabling non-boot cpus failed");
 		goto Enable_cpus;
 	}
+    switch_powercollapse_dump();
 
 	arch_suspend_disable_irqs();
 	BUG_ON(!irqs_disabled());
@@ -616,6 +623,39 @@ static int enter_state(suspend_state_t state)
 	return error;
 }
 
+static void pm_suspend_entry_marker(char *annotation, suspend_state_t state, struct timespec *pts)
+{
+	struct rtc_time tm;
+
+	if (pts) {
+		getnstimeofday(pts);
+		rtc_time_to_tm(pts->tv_sec, &tm);
+		pr_info("PM: suspend %s (%s) %d-%02d-%02d %02d:%02d:%02d.%09lu UTC\n",
+			annotation, mem_sleep_labels[state], tm.tm_year + 1900, tm.tm_mon + 1,
+			tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, pts->tv_nsec);
+	}
+}
+
+static void pm_suspend_exit_marker(char *annotation,struct timespec *pts)
+{
+	struct timespec ts;
+	struct rtc_time tm;
+
+	getnstimeofday(&ts);
+	rtc_time_to_tm(ts.tv_sec, &tm);
+	if (pts) {
+		if (pts->tv_sec > ts.tv_sec) {
+			pts->tv_sec = 0;
+		} else {
+			pts->tv_sec = ts.tv_sec - pts->tv_sec;
+		}
+		pr_info("Suspend entry -> exit %ld sec\n",pts->tv_sec);
+	}
+	pr_info("PM: suspend %s %d-%02d-%02d %02d:%02d:%02d.%09lu UTC\n",
+		annotation, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+		tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec);
+}
+
 /**
  * pm_suspend - Externally visible function for suspending the system.
  * @state: System sleep state to enter.
@@ -626,11 +666,14 @@ static int enter_state(suspend_state_t state)
 int pm_suspend(suspend_state_t state)
 {
 	int error;
+	struct timespec ts;		
 
 	if (state <= PM_SUSPEND_ON || state >= PM_SUSPEND_MAX)
 		return -EINVAL;
 
-	pr_info("suspend entry (%s)\n", mem_sleep_labels[state]);
+/*	pr_info("suspend entry (%s)\n", mem_sleep_labels[state]); */
+	pm_suspend_entry_marker("entry", state, &ts);
+	switch_before_suspend_gpio_dump();
 	error = enter_state(state);
 	if (error) {
 		suspend_stats.fail++;
@@ -638,7 +681,8 @@ int pm_suspend(suspend_state_t state)
 	} else {
 		suspend_stats.success++;
 	}
-	pr_info("suspend exit\n");
+/*	pr_info("suspend exit\n"); */
+	pm_suspend_exit_marker("exit", &ts);
 	return error;
 }
 EXPORT_SYMBOL(pm_suspend);

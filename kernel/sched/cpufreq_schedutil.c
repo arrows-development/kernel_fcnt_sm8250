@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * CPUFreq governor based on scheduler-provided CPU utilization data.
  *
@@ -21,6 +24,8 @@ struct sugov_tunables {
 	struct gov_attr_set	attr_set;
 	unsigned int		up_rate_limit_us;
 	unsigned int		down_rate_limit_us;
+	unsigned int		up_rate_limit_us_work;
+	unsigned int		down_rate_limit_us_work;
 	unsigned int		hispeed_load;
 	unsigned int		hispeed_freq;
 	unsigned int		rtg_boost_freq;
@@ -45,6 +50,8 @@ struct sugov_policy {
 	s64			min_rate_limit_ns;
 	s64			up_rate_delay_ns;
 	s64			down_rate_delay_ns;
+	s64			up_rate_delay_ns_work;
+	s64			down_rate_delay_ns_work;
 	unsigned int		next_freq;
 	unsigned int		cached_raw_freq;
 	unsigned int		prev_cached_raw_freq;
@@ -892,6 +899,16 @@ static void update_min_rate_limit_ns(struct sugov_policy *sg_policy)
 	mutex_lock(&min_rate_lock);
 	sg_policy->min_rate_limit_ns = min(sg_policy->up_rate_delay_ns,
 					   sg_policy->down_rate_delay_ns);
+	if (sg_policy->min_rate_limit_ns == 0) {
+		sg_policy->min_rate_limit_ns = min(sg_policy->up_rate_delay_ns_work,
+						   sg_policy->down_rate_delay_ns_work);
+	}
+	pr_debug("related_cpu:%lx limit_ns:%lld, up:%lld, down:%lld, "
+		"up_work:%lld, down_work:%lld\n",
+		cpumask_bits(sg_policy->policy->related_cpus)[0],
+		sg_policy->min_rate_limit_ns,
+		sg_policy->up_rate_delay_ns, sg_policy->down_rate_delay_ns,
+		sg_policy->up_rate_delay_ns_work, sg_policy->down_rate_delay_ns_work);
 	mutex_unlock(&min_rate_lock);
 }
 
@@ -1188,6 +1205,8 @@ static void sugov_tunables_save(struct cpufreq_policy *policy,
 	cached->hispeed_freq = tunables->hispeed_freq;
 	cached->up_rate_limit_us = tunables->up_rate_limit_us;
 	cached->down_rate_limit_us = tunables->down_rate_limit_us;
+	cached->up_rate_limit_us_work = tunables->up_rate_limit_us_work;
+	cached->down_rate_limit_us_work = tunables->down_rate_limit_us_work;
 }
 
 static void sugov_clear_global_tunables(void)
@@ -1211,6 +1230,8 @@ static void sugov_tunables_restore(struct cpufreq_policy *policy)
 	tunables->hispeed_freq = cached->hispeed_freq;
 	tunables->up_rate_limit_us = cached->up_rate_limit_us;
 	tunables->down_rate_limit_us = cached->down_rate_limit_us;
+	tunables->up_rate_limit_us_work = cached->up_rate_limit_us_work;
+	tunables->down_rate_limit_us_work = cached->down_rate_limit_us_work;
 }
 
 static int sugov_init(struct cpufreq_policy *policy)
@@ -1258,6 +1279,8 @@ static int sugov_init(struct cpufreq_policy *policy)
 
 	tunables->up_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
 	tunables->down_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
+	tunables->up_rate_limit_us_work = cpufreq_policy_transition_delay_us(policy);
+	tunables->down_rate_limit_us_work = cpufreq_policy_transition_delay_us(policy);
 	tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
 	tunables->hispeed_freq = 0;
 
@@ -1344,6 +1367,10 @@ static int sugov_start(struct cpufreq_policy *policy)
 		sg_policy->tunables->up_rate_limit_us * NSEC_PER_USEC;
 	sg_policy->down_rate_delay_ns =
 		sg_policy->tunables->down_rate_limit_us * NSEC_PER_USEC;
+	sg_policy->up_rate_delay_ns_work =
+		sg_policy->tunables->up_rate_limit_us_work * NSEC_PER_USEC;
+	sg_policy->down_rate_delay_ns_work =
+		sg_policy->tunables->down_rate_limit_us_work * NSEC_PER_USEC;
 	update_min_rate_limit_ns(sg_policy);
 	sg_policy->last_freq_update_time	= 0;
 	sg_policy->next_freq			= 0;
@@ -1455,3 +1482,214 @@ static int __init sugov_register(void)
 	return cpufreq_register_governor(&schedutil_gov);
 }
 fs_initcall(sugov_register);
+
+static struct sugov_tunables* get_cpu_tunables(struct cpufreq_policy *policy, int cpu)
+{
+	struct sugov_tunables *cached = NULL;
+	struct sugov_policy *sg_policy = NULL;
+	struct sugov_tunables *tunables = NULL;
+
+	if (unlikely(!policy || (policy->governor != &schedutil_gov))) {
+		pr_debug("  cpu%u undefined policy, get tunables cache direct\n", cpu);
+		cached = per_cpu(cached_tunables, cpu);
+		if (unlikely(!cached)) {
+			cached = kzalloc(sizeof(*tunables), GFP_KERNEL);
+			if (!cached) {
+				pr_warn("Couldn't allocate tunables for caching\n");
+				return NULL;
+			}
+			cached->up_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
+			cached->down_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
+			cached->up_rate_limit_us_work = cpufreq_policy_transition_delay_us(policy);
+			cached->down_rate_limit_us_work = cpufreq_policy_transition_delay_us(policy);
+			cached->hispeed_load = DEFAULT_HISPEED_LOAD;
+			cached->hispeed_freq = 0;
+			for_each_cpu(cpu, policy->related_cpus)
+				per_cpu(cached_tunables, cpu) = cached;
+		}
+		tunables = cached;
+	} else {
+		sg_policy = policy->governor_data;
+		tunables = sg_policy->tunables;
+		if (!tunables) {
+			pr_debug("cpu%d tunable not initialized, newly alloc\n", cpu);
+			tunables = sugov_tunables_alloc(sg_policy);
+			if (IS_ERR(tunables)) {
+				pr_err("cpu%d tunable not initialized, newly alloc failed\n", cpu);
+				tunables = NULL;
+			} else {
+				tunables->up_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
+				tunables->down_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
+				tunables->up_rate_limit_us_work = cpufreq_policy_transition_delay_us(policy);
+				tunables->down_rate_limit_us_work = cpufreq_policy_transition_delay_us(policy);
+				tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
+				tunables->hispeed_freq = 0;
+			}
+		}
+	}
+
+	return tunables;
+}
+
+static void update_min_rate_limit(struct cpufreq_policy *policy)
+{
+	struct sugov_policy *sg_policy = NULL;
+	struct sugov_tunables *tunables = NULL;
+
+	if (unlikely(!policy || (policy->governor != &schedutil_gov))) {
+		pr_debug("undefined policy\n");
+		return;
+	}
+	sg_policy = policy->governor_data;
+	tunables = sg_policy->tunables;
+	list_for_each_entry(sg_policy, &tunables->attr_set.policy_list, tunables_hook) {
+		sg_policy->up_rate_delay_ns_work = tunables->up_rate_limit_us_work * NSEC_PER_USEC;
+		sg_policy->down_rate_delay_ns_work = tunables->down_rate_limit_us_work * NSEC_PER_USEC;
+		update_min_rate_limit_ns(sg_policy);
+	}
+
+	return;
+}
+
+#define FLAG_UP_RATE_LIMIT_US	(1 << 0)
+#define FLAG_DOWN_RATE_LIMIT_US	(1 << 1)
+#define FLAG_HISPEED_FREQ	(1 << 2)
+#define FLAG_HISPEED_LOAD	(1 << 3)
+
+int cpufreq_schedutil_set_param(
+			cpumask_t cpu_mask,
+			unsigned int up_rate_limit_us,
+			unsigned int down_rate_limit_us,
+			unsigned int hispeed_freq,
+			unsigned int hispeed_load,
+			unsigned int flag)
+{
+	int ret = 0;
+	struct cpufreq_policy *policy;
+	struct sugov_tunables *tunables;
+	cpumask_t related = { CPU_BITS_NONE };
+	int cpu;
+
+	cpumask_and(&cpu_mask, &cpu_mask, cpu_possible_mask);
+
+	pr_debug("msk:%lx, up_rate_limit_us:%u, down_rate_limit_us:%u, "
+		"hispeed_freq:%u, hispeed_load:%u, flag:%u\n",
+		cpumask_bits(&cpu_mask)[0], up_rate_limit_us, down_rate_limit_us,
+		hispeed_freq, hispeed_load, flag);
+
+	cpus_read_lock();
+
+	for_each_cpu(cpu, &cpu_mask) {
+		if (cpumask_test_cpu(cpu, &related))
+			continue;
+
+		mutex_lock(&global_tunables_lock);
+
+		policy = cpufreq_cpu_get(cpu);
+		tunables = get_cpu_tunables(policy, cpu);
+		if (tunables) {
+			if (flag & FLAG_UP_RATE_LIMIT_US) {
+				pr_debug("cpu%d up_rate_limit_us set\n", cpu);
+				tunables->up_rate_limit_us_work = up_rate_limit_us;
+			}
+			if (flag & FLAG_DOWN_RATE_LIMIT_US) {
+				pr_debug("cpu%d down_rate_limit_us set\n", cpu);
+				tunables->down_rate_limit_us_work = down_rate_limit_us;
+			}
+			if (flag & (FLAG_UP_RATE_LIMIT_US | FLAG_DOWN_RATE_LIMIT_US)) {
+				update_min_rate_limit(policy);
+			}
+			if (flag & FLAG_HISPEED_FREQ) {
+				pr_debug("cpu%d hispeed_freq set\n", cpu);
+				tunables->hispeed_freq = hispeed_freq;
+			}
+			if (flag & FLAG_HISPEED_LOAD) {
+				pr_debug("cpu%d hispeed_load set\n", cpu);
+				tunables->hispeed_load = hispeed_load;
+			}
+		}
+
+		mutex_unlock(&global_tunables_lock);
+
+		if (policy) {
+			if (have_governor_per_policy()) {
+				cpumask_or(&related, &related, policy->related_cpus);
+				pr_debug("  related_cpu:%lx\n", cpumask_bits(policy->related_cpus)[0]);
+			} else {
+				cpumask_or(&related, &related, cpu_possible_mask);
+				pr_debug("  related_cpu:%lx\n", cpumask_bits(cpu_possible_mask)[0]);
+			}
+			cpufreq_cpu_put(policy);
+		} else {
+			cpumask_or(&related, &related, topology_core_cpumask(cpu));
+			pr_debug("  related_cpu:%lx\n", cpumask_bits(topology_core_cpumask(cpu))[0]);
+		}
+	}
+	cpus_read_unlock();
+	pr_debug("done %d\n", ret);
+
+	return ret;
+}
+int cpufreq_schedutil_set_freq(cpumask_t cpu_mask, unsigned int freq)
+{
+	int cpu;
+	int anyboost = 0;
+	struct cpufreq_policy *policy;
+	struct sugov_policy *sg_policy;
+	unsigned long flags;
+	cpumask_t related = { CPU_BITS_NONE };
+	u64 time;
+
+	cpumask_and(&cpu_mask, &cpu_mask, cpu_possible_mask);
+
+	pr_debug("msk:%lx, freq:%u\n", cpumask_bits(&cpu_mask)[0], freq);
+
+	cpus_read_lock();
+
+	for_each_cpu(cpu, &cpu_mask) {
+		if (cpumask_test_cpu(cpu, &related))
+			continue;
+		if (!cpu_online(cpu))
+			continue;
+
+		policy = cpufreq_cpu_get(cpu);
+		if (!policy)
+			continue;
+
+		sg_policy = policy->governor_data;
+
+		if (sg_policy->policy->cur < freq) {
+			anyboost = 1;
+			pr_debug("cpu%d freq %u -> %u\n", cpu, sg_policy->policy->cur, freq);
+
+			time = sched_ktime_clock();
+			if (sg_policy->policy->fast_switch_enabled) {
+				sugov_fast_switch(sg_policy, time, freq);
+			} else {
+				raw_spin_lock_irqsave(&sg_policy->update_lock, flags);
+				sugov_deferred_update(sg_policy, time, freq);
+				raw_spin_unlock_irqrestore(&sg_policy->update_lock, flags);
+			}
+		}
+
+		if (have_governor_per_policy()) {
+			cpumask_or(&related, &related, policy->related_cpus);
+			pr_debug("  related_cpu:%lx\n", cpumask_bits(policy->related_cpus)[0]);
+		} else {
+			cpumask_or(&related, &related, cpu_possible_mask);
+			pr_debug("  related_cpu:%lx\n", cpumask_bits(cpu_possible_mask)[0]);
+		}
+
+		cpufreq_cpu_put(policy);
+	}
+
+	if (anyboost) {
+		pr_debug("kick boost done\n");
+	} else {
+		pr_debug("done (no boost)\n");
+	}
+
+	cpus_read_unlock();
+
+	return 0;
+}

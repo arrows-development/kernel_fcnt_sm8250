@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
  */
@@ -2236,12 +2239,27 @@ void mark_task_starting(struct task_struct *p)
 			 cluster_first_cpu(sched_cluster[0]))),	\
 			 ((u64)SCHED_CAPACITY_SCALE * 100))
 
+extern unsigned int work_sched_group_upmigrate_pct;
+extern unsigned int work_sched_group_downmigrate_pct;
+
 static inline void walt_update_group_thresholds(void)
 {
+#if 0
 	sched_group_upmigrate =
 			pct_to_min_scaled(sysctl_sched_group_upmigrate_pct);
 	sched_group_downmigrate =
 			pct_to_min_scaled(sysctl_sched_group_downmigrate_pct);
+#else
+	sched_group_upmigrate =
+			pct_to_min_scaled(min(sysctl_sched_group_upmigrate_pct, work_sched_group_upmigrate_pct));
+	sched_group_downmigrate =
+			pct_to_min_scaled(min(sysctl_sched_group_downmigrate_pct, work_sched_group_downmigrate_pct));
+
+	pr_debug("update group_upmigrate:%u, sysctl:%u work:%u\n", sched_group_upmigrate,
+		sysctl_sched_group_upmigrate_pct, work_sched_group_upmigrate_pct);
+	pr_debug("update group_downmigrate:%u, sysctl:%u work:%u\n", sched_group_downmigrate,
+		sysctl_sched_group_downmigrate_pct, work_sched_group_downmigrate_pct);
+#endif
 }
 
 static void walt_cpus_capacity_changed(const cpumask_t *cpus)
@@ -2673,6 +2691,7 @@ DEFINE_RWLOCK(related_thread_group_lock);
  */
 unsigned int __read_mostly sched_group_upmigrate = 20000000;
 unsigned int __read_mostly sysctl_sched_group_upmigrate_pct = 100;
+unsigned int __read_mostly work_sched_group_upmigrate_pct = 800;
 
 /*
  * Task groups, once up-migrated, will need to drop their aggregate
@@ -2681,6 +2700,7 @@ unsigned int __read_mostly sysctl_sched_group_upmigrate_pct = 100;
  */
 unsigned int __read_mostly sched_group_downmigrate = 19000000;
 unsigned int __read_mostly sysctl_sched_group_downmigrate_pct = 95;
+unsigned int __read_mostly work_sched_group_downmigrate_pct = 800;
 
 static inline
 void update_best_cluster(struct related_thread_group *grp,
@@ -3560,22 +3580,186 @@ fill_util:
 	}
 }
 
+static DEFINE_MUTEX(sched_eas_param_mutex);
+
+#define FLAG_INIT_TASK_UTIL	(1 << 0)
+#define FLAG_UPMIGRATE		(1 << 1)
+#define FLAG_DOWNMIGRATE	(1 << 2)
+#define FLAG_PRIME_UPMIGRATE	(1 << 3)
+#define FLAG_PRIME_DOWNMIGRATE	(1 << 4)
+#define FLAG_GROUP_UPMIGRATE	(1 << 5)
+#define FLAG_GROUP_DOWNMIGRATE	(1 << 6)
+
+#ifdef CONFIG_PROC_SYSCTL
+static void sched_update_updown_migrate_values(bool up);
+#else
+#error
+#endif
+extern unsigned int sysctl_sched_capacity_margin_up[MAX_MARGIN_LEVELS];
+extern unsigned int sysctl_sched_capacity_margin_down[MAX_MARGIN_LEVELS];
+extern unsigned int work_sched_capacity_margin_up[MAX_MARGIN_LEVELS];
+extern unsigned int work_sched_capacity_margin_down[MAX_MARGIN_LEVELS];
+
+int sched_set_walt_params(
+			unsigned int init_task_util,
+			unsigned int group_upmigrate,
+			unsigned int group_downmigrate,
+			unsigned int flag)
+{
+	struct rq *rq = cpu_rq(cpumask_first(cpu_possible_mask));
+	unsigned long flags;
+
+	pr_debug("init_task_util:%u, group_upmigrate:%u, group_downmigrate:%u, flag:%u\n",
+		init_task_util, group_upmigrate, group_downmigrate, flag);
+
+	mutex_lock(&sched_eas_param_mutex);
+
+	pr_debug("now param init_task_util:%u, group_upmigrate:%u, group_downmigrate:%u\n",
+		sysctl_sched_init_task_load_pct,
+		work_sched_group_upmigrate_pct, work_sched_group_downmigrate_pct);
+
+	/* valid check */
+	if (!(flag & FLAG_INIT_TASK_UTIL)) init_task_util = sysctl_sched_init_task_load_pct;
+	if (!(flag & FLAG_GROUP_UPMIGRATE)) group_upmigrate = work_sched_group_upmigrate_pct;
+	if (!(flag & FLAG_GROUP_DOWNMIGRATE)) group_downmigrate = work_sched_group_downmigrate_pct;
+	if (group_downmigrate > group_upmigrate || group_downmigrate < 0) {
+		mutex_unlock(&sched_eas_param_mutex);
+		pr_err("failed %d\n", -EINVAL);
+		return -EINVAL;
+	}
+
+	if (flag & FLAG_INIT_TASK_UTIL) sysctl_sched_init_task_load_pct = init_task_util;
+	if (flag & FLAG_GROUP_UPMIGRATE) work_sched_group_upmigrate_pct = group_upmigrate;
+	if (flag & FLAG_GROUP_DOWNMIGRATE) work_sched_group_downmigrate_pct = group_downmigrate;
+	pr_debug("update init_task_util:%u, group_upmigrate:%u, group_downmigrate:%u\n",
+		sysctl_sched_init_task_load_pct,
+		work_sched_group_upmigrate_pct, work_sched_group_downmigrate_pct);
+
+	raw_spin_lock_irqsave(&rq->lock, flags);
+	walt_update_group_thresholds();
+	raw_spin_unlock_irqrestore(&rq->lock, flags);
+
+	mutex_unlock(&sched_eas_param_mutex);
+
+	return 0;
+}
+
+#define PCT_TO_CAP	0 /* % -> capacity */
+#define CAP_TO_PCT	1 /* capacity -> % */
+#define CAP_MAX		(SCHED_FIXEDPOINT_SCALE * 100)
+
+static int sched_updown_migrate_margin_conv(int *pctp, int *capp, int conv)
+{
+	if (conv == PCT_TO_CAP) {
+		if (*pctp <= 0)
+			return -EINVAL;
+		*capp = SCHED_FIXEDPOINT_SCALE * 100 / *pctp;
+	} else {
+		if ((*capp <= 0) || (*capp > CAP_MAX))
+			return -EINVAL;
+		*pctp = SCHED_FIXEDPOINT_SCALE * 100 / *capp;
+	}
+	return 0;
+}
+
+int sched_set_eas_params(
+			unsigned int init_task_util,
+			unsigned int upmigrate,
+			unsigned int downmigrate,
+			unsigned int prime_upmigrate,
+			unsigned int prime_downmigrate,
+			unsigned int group_upmigrate,
+			unsigned int group_downmigrate,
+			unsigned int flag)
+{
+	int ret;
+
+	pr_debug("upmigrate:%u, downmigrate:%u, "
+		"prime_upmigrate:%u, prime_downmigrate:%u, flag:%u\n",
+		upmigrate, downmigrate,
+		prime_upmigrate, prime_downmigrate, flag);
+
+	ret = sched_set_walt_params(init_task_util, group_upmigrate, group_downmigrate, flag);
+	if (ret < 0) {
+		return ret;
+	}
+
+	mutex_lock(&sched_eas_param_mutex);
+
+	pr_debug(" now param upmigrate:%u, downmigrate:%u, "
+		"prime_upmigrate:%u, prime_downmigrate:%u\n",
+		work_sched_capacity_margin_up[0], work_sched_capacity_margin_down[0],
+		work_sched_capacity_margin_up[1], work_sched_capacity_margin_down[1]);
+
+	/* valid check (see the write process of sched_updown_migrate_handler) */
+	if (!(flag & FLAG_UPMIGRATE))
+		sched_updown_migrate_margin_conv(&upmigrate, &work_sched_capacity_margin_up[0], CAP_TO_PCT);
+	if (!(flag & FLAG_DOWNMIGRATE))
+		sched_updown_migrate_margin_conv(&downmigrate, &work_sched_capacity_margin_down[0], CAP_TO_PCT);
+	if (!(flag & FLAG_PRIME_UPMIGRATE))
+		sched_updown_migrate_margin_conv(&prime_upmigrate, &work_sched_capacity_margin_up[1], CAP_TO_PCT);
+	if (!(flag & FLAG_PRIME_DOWNMIGRATE))
+		sched_updown_migrate_margin_conv(&prime_downmigrate, &work_sched_capacity_margin_down[1], CAP_TO_PCT);
+	if ((downmigrate > upmigrate) ||
+	    (downmigrate <= 0) ||
+	    (prime_downmigrate > prime_upmigrate) ||
+	    (prime_downmigrate <= 0)) {
+		/* work_sched_capacity_margin_up[i] > work_sched_capacity_margin_down[i] */
+		/* invalid value */
+		mutex_unlock(&sched_eas_param_mutex);
+		pr_err("invalid value failed %d\n", -EINVAL);
+		return -EINVAL;
+	}
+
+	/* update check (see the write process of sched_updown_migrate_handler) */
+	if (flag & FLAG_UPMIGRATE)
+		sched_updown_migrate_margin_conv(&upmigrate,
+			&work_sched_capacity_margin_up[0], PCT_TO_CAP);
+	if (flag & FLAG_DOWNMIGRATE)
+		sched_updown_migrate_margin_conv(&downmigrate,
+			&work_sched_capacity_margin_down[0], PCT_TO_CAP);
+	if (flag & FLAG_PRIME_UPMIGRATE)
+		sched_updown_migrate_margin_conv(&prime_upmigrate,
+			&work_sched_capacity_margin_up[1], PCT_TO_CAP);
+	if (flag & FLAG_PRIME_DOWNMIGRATE)
+		sched_updown_migrate_margin_conv(&prime_downmigrate,
+			&work_sched_capacity_margin_down[1], PCT_TO_CAP);
+
+	if ((flag & FLAG_UPMIGRATE) || (flag & FLAG_PRIME_UPMIGRATE))
+		sched_update_updown_migrate_values(true);
+	if ((flag & FLAG_DOWNMIGRATE) || (flag & FLAG_PRIME_DOWNMIGRATE))
+		sched_update_updown_migrate_values(false);
+
+	pr_debug("upmigrate:%u(%u), downmigrate:%u(%u), "
+		"prime_upmigrate:%u(%u), prime_downmigrate:%u(%u)\n",
+		upmigrate, work_sched_capacity_margin_up[0],
+		downmigrate, work_sched_capacity_margin_down[0],
+		prime_upmigrate, work_sched_capacity_margin_up[1],
+		prime_downmigrate, work_sched_capacity_margin_down[1]);
+
+	mutex_unlock(&sched_eas_param_mutex);
+
+	return 0;
+}
+
 int walt_proc_group_thresholds_handler(struct ctl_table *table, int write,
 				       void __user *buffer, size_t *lenp,
 				       loff_t *ppos)
 {
 	int ret;
-	static DEFINE_MUTEX(mutex);
+	/* static DEFINE_MUTEX(mutex); */
 	struct rq *rq = cpu_rq(cpumask_first(cpu_possible_mask));
 	unsigned long flags;
 
 	if (unlikely(num_sched_clusters <= 0))
 		return -EPERM;
 
-	mutex_lock(&mutex);
+	/* mutex_lock(&mutex); */
+	mutex_lock(&sched_eas_param_mutex);
 	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
 	if (ret || !write) {
-		mutex_unlock(&mutex);
+		/* mutex_unlock(&mutex); */
+		mutex_unlock(&sched_eas_param_mutex);
 		return ret;
 	}
 
@@ -3589,7 +3773,8 @@ int walt_proc_group_thresholds_handler(struct ctl_table *table, int write,
 	walt_update_group_thresholds();
 	raw_spin_unlock_irqrestore(&rq->lock, flags);
 
-	mutex_unlock(&mutex);
+	/* mutex_unlock(&mutex); */
+	mutex_unlock(&sched_eas_param_mutex);
 
 	return ret;
 }
@@ -3748,6 +3933,10 @@ unsigned int sysctl_sched_capacity_margin_up[MAX_MARGIN_LEVELS] = {
 			[0 ... MAX_MARGIN_LEVELS-1] = 1078}; /* ~5% margin */
 unsigned int sysctl_sched_capacity_margin_down[MAX_MARGIN_LEVELS] = {
 			[0 ... MAX_MARGIN_LEVELS-1] = 1205}; /* ~15% margin */
+unsigned int work_sched_capacity_margin_up[MAX_MARGIN_LEVELS] = {
+			[0 ... MAX_MARGIN_LEVELS-1] = 1024}; /* ~0% margin */
+unsigned int work_sched_capacity_margin_down[MAX_MARGIN_LEVELS] = {
+			[0 ... MAX_MARGIN_LEVELS-1] = 1024}; /* ~0% margin */
 
 #ifdef CONFIG_PROC_SYSCTL
 static void sched_update_updown_migrate_values(bool up)
@@ -3764,12 +3953,19 @@ static void sched_update_updown_migrate_values(bool up)
 		for_each_sched_cluster(cluster) {
 			for_each_cpu(cpu, &cluster->cpus) {
 
-				if (up)
+				if (up) {
 					sched_capacity_margin_up[cpu] =
 					sysctl_sched_capacity_margin_up[i];
-				else
+					if (work_sched_capacity_margin_up[i] < sysctl_sched_capacity_margin_up[i])
+						sched_capacity_margin_up[cpu] =
+						work_sched_capacity_margin_up[i];
+				} else {
 					sched_capacity_margin_down[cpu] =
 					sysctl_sched_capacity_margin_down[i];
+					if (work_sched_capacity_margin_down[i] < sysctl_sched_capacity_margin_down[i])
+						sched_capacity_margin_down[cpu] =
+						work_sched_capacity_margin_down[i];
+				}
 			}
 
 			if (++i >= cap_margin_levels)
@@ -3777,12 +3973,19 @@ static void sched_update_updown_migrate_values(bool up)
 		}
 	} else {
 		for_each_possible_cpu(cpu) {
-			if (up)
+			if (up) {
 				sched_capacity_margin_up[cpu] =
 					sysctl_sched_capacity_margin_up[0];
-			else
+				if (work_sched_capacity_margin_up[0] < sysctl_sched_capacity_margin_up[0])
+					sched_capacity_margin_up[cpu] =
+					work_sched_capacity_margin_up[0];
+			} else {
 				sched_capacity_margin_down[cpu] =
 					sysctl_sched_capacity_margin_down[0];
+				if (work_sched_capacity_margin_down[0] < sysctl_sched_capacity_margin_down[0])
+					sched_capacity_margin_down[cpu] =
+						work_sched_capacity_margin_down[0];
+			}
 		}
 	}
 }
@@ -3794,13 +3997,14 @@ int sched_updown_migrate_handler(struct ctl_table *table, int write,
 	int ret, i;
 	unsigned int *data = (unsigned int *)table->data;
 	unsigned int *old_val;
-	static DEFINE_MUTEX(mutex);
+	/* static DEFINE_MUTEX(mutex); */
 	int cap_margin_levels = num_sched_clusters ? num_sched_clusters - 1 : 0;
 
 	if (cap_margin_levels <= 0)
 		return -EINVAL;
 
-	mutex_lock(&mutex);
+	/* mutex_lock(&mutex); */
+	mutex_lock(&sched_eas_param_mutex);
 
 	if (table->maxlen != (sizeof(unsigned int) * cap_margin_levels))
 		table->maxlen = sizeof(unsigned int) * cap_margin_levels;
@@ -3843,7 +4047,8 @@ int sched_updown_migrate_handler(struct ctl_table *table, int write,
 free_old_val:
 	kfree(old_val);
 unlock_mutex:
-	mutex_unlock(&mutex);
+	/* mutex_unlock(&mutex); */
+	mutex_unlock(&sched_eas_param_mutex);
 
 	return ret;
 }

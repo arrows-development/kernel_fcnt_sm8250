@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
  */
@@ -24,6 +27,7 @@ struct cluster_data {
 	bool inited;
 	unsigned int min_cpus;
 	unsigned int max_cpus;
+	unsigned int pd_max_cpus;
 	unsigned int offline_delay_ms;
 	unsigned int busy_up_thres[MAX_CPUS_PER_CLUSTER];
 	unsigned int busy_down_thres[MAX_CPUS_PER_CLUSTER];
@@ -744,7 +748,9 @@ static unsigned int apply_task_need(const struct cluster_data *cluster,
 static unsigned int apply_limits(const struct cluster_data *cluster,
 				 unsigned int need_cpus)
 {
-	return min(max(cluster->min_cpus, need_cpus), cluster->max_cpus);
+	/* return min(max(cluster->min_cpus, need_cpus), cluster->max_cpus); */
+	return min(max(cluster->min_cpus, need_cpus),
+		   min(cluster->max_cpus, cluster->pd_max_cpus));
 }
 
 static unsigned int get_active_cpu_count(const struct cluster_data *cluster)
@@ -788,7 +794,8 @@ static bool eval_need(struct cluster_data *cluster)
 	spin_lock_irqsave(&state_lock, flags);
 
 	if (cluster->boost || !cluster->enable || need_all_cpus(cluster)) {
-		need_cpus = cluster->max_cpus;
+		/* need_cpus = cluster->max_cpus; */
+		need_cpus = min(cluster->max_cpus, cluster->pd_max_cpus);
 	} else {
 		cluster->active_cpus = get_active_cpu_count(cluster);
 		thres_idx = cluster->active_cpus ? cluster->active_cpus - 1 : 0;
@@ -1048,7 +1055,8 @@ again:
 	 * If the number of active CPUs is within the limits, then
 	 * don't force isolation of any busy CPUs.
 	 */
-	if (cluster->active_cpus <= cluster->max_cpus)
+	/* if (cluster->active_cpus <= cluster->max_cpus) */
+	if (cluster->active_cpus <= min(cluster->max_cpus, cluster->pd_max_cpus))
 		return;
 
 	nr_isolated = 0;
@@ -1060,7 +1068,8 @@ again:
 
 		if (!is_active(c))
 			continue;
-		if (cluster->active_cpus <= cluster->max_cpus)
+		/* if (cluster->active_cpus <= cluster->max_cpus) */
+		if (cluster->active_cpus <= min(cluster->max_cpus, cluster->pd_max_cpus))
 			break;
 
 		if (first_pass && !c->not_preferred)
@@ -1082,7 +1091,8 @@ again:
 	cluster->nr_isolated_cpus += nr_isolated;
 	spin_unlock_irqrestore(&state_lock, flags);
 
-	if (first_pass && cluster->active_cpus > cluster->max_cpus) {
+	/* if (first_pass && cluster->active_cpus > cluster->max_cpus) { */
+	if (first_pass && cluster->active_cpus > min(cluster->max_cpus, cluster->pd_max_cpus)) {
 		first_pass = false;
 		goto again;
 	}
@@ -1295,6 +1305,7 @@ static int cluster_init(const struct cpumask *mask)
 	cluster->first_cpu = first_cpu;
 	cluster->min_cpus = 1;
 	cluster->max_cpus = cluster->num_cpus;
+	cluster->pd_max_cpus = cluster->num_cpus;
 	cluster->need_cpus = cluster->num_cpus;
 	cluster->offline_delay_ms = 100;
 	cluster->task_thres = UINT_MAX;
@@ -1354,3 +1365,80 @@ static int __init core_ctl_init(void)
 }
 
 late_initcall(core_ctl_init);
+
+int core_ctl_set_core_limit(int num_core_limit_little,
+			    int num_core_limit_big,
+			    int num_core_limit_prime,
+			    unsigned int flag)
+{
+	unsigned int index = 0;
+	struct cluster_data *cluster;
+	unsigned long flags;
+	bool state_changed = false;
+
+	pr_debug("little:%d, big:%d, flag:%u\n", num_core_limit_little, num_core_limit_big, flag);
+
+	if (unlikely(!initialized))
+		return 0;
+
+	spin_lock_irqsave(&state_lock, flags);
+	for_each_cluster(cluster, index) {
+		if (!cluster->inited)
+			continue;
+		if (cluster->first_cpu == 0) {
+			if (cluster->pd_max_cpus != num_core_limit_little) {
+				cluster->pd_max_cpus = num_core_limit_little;
+				state_changed = true;
+			}
+		} else if (cluster->first_cpu == 4) {
+			if (cluster->pd_max_cpus != num_core_limit_big) {
+				cluster->pd_max_cpus = num_core_limit_big;
+				state_changed = true;
+			}
+		} else {
+			if (cluster->pd_max_cpus != num_core_limit_prime) {
+				cluster->pd_max_cpus = num_core_limit_prime;
+				state_changed = true;
+			}
+		}
+	}
+	spin_unlock_irqrestore(&state_lock, flags);
+
+	if (state_changed) {
+		index = 0;
+		for_each_cluster(cluster, index)
+			apply_need(cluster);
+	}
+
+	pr_debug("done\n");
+	return 0;
+}
+
+void core_ctl_reset_core_limit(void)
+{
+	unsigned int index = 0;
+	struct cluster_data *cluster;
+	unsigned long flags;
+	bool state_changed = false;
+
+	pr_debug("void\n");
+
+	spin_lock_irqsave(&state_lock, flags);
+	for_each_cluster(cluster, index) {
+		if (!cluster->inited)
+			continue;
+		if (cluster->pd_max_cpus != cluster->num_cpus) {
+			cluster->pd_max_cpus = cluster->num_cpus;
+			state_changed = true;
+		}
+	}
+	spin_unlock_irqrestore(&state_lock, flags);
+
+	if (state_changed) {
+		index = 0;
+		for_each_cluster(cluster, index)
+			apply_need(cluster);
+	}
+
+	pr_debug("done\n");
+}

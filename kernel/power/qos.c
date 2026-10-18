@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * This module exposes the interface to kernel space for specifying
  * QoS dependencies.  It provides infrastructure for registration of:
@@ -129,6 +132,35 @@ static struct pm_qos_object memory_bandwidth_pm_qos = {
 	.name = "memory_bandwidth",
 };
 
+#define PCPC_NAME_PM_QOS(tag) tag##_pm_qos
+#define PCPC_DEFINE(tag,lbl,typ) \
+static BLOCKING_NOTIFIER_HEAD(tag##_notifier); \
+static struct pm_qos_constraints tag##_constraints = { \
+	.list = PLIST_HEAD_INIT(tag##_constraints.list), \
+	.target_value = PM_QOS_##lbl##_DEFAULT_VALUE, \
+	.target_per_cpu = { [0 ... (NR_CPUS - 1)] = \
+			PM_QOS_##lbl##_DEFAULT_VALUE }, \
+	.default_value = PM_QOS_##lbl##_DEFAULT_VALUE, \
+	.no_constraint_value = PM_QOS_##lbl##_DEFAULT_VALUE, \
+	.type = typ, \
+	.notifiers = &tag##_notifier, \
+}; \
+static struct pm_qos_object PCPC_NAME_PM_QOS(tag) = { \
+	.constraints = &tag##_constraints, \
+	.name = #tag, \
+}
+PCPC_DEFINE(lit_maxf    , LIT_MAXF    , PM_QOS_MIN);
+PCPC_DEFINE(big_maxf    , BIG_MAXF    , PM_QOS_MIN);
+PCPC_DEFINE(prim_maxf   , PRIM_MAXF   , PM_QOS_MIN);
+PCPC_DEFINE(lit_minf    , LIT_MINF    , PM_QOS_MAX);
+PCPC_DEFINE(big_minf    , BIG_MINF    , PM_QOS_MAX);
+PCPC_DEFINE(prim_minf   , PRIM_MINF   , PM_QOS_MAX);
+PCPC_DEFINE(lit_upcore  , LIT_UPCORE  , PM_QOS_MIN);
+PCPC_DEFINE(big_upcore  , BIG_UPCORE  , PM_QOS_MIN);
+PCPC_DEFINE(prim_upcore , PRIM_UPCORE , PM_QOS_MIN);
+PCPC_DEFINE(bus_min     , BUS_MIN     , PM_QOS_MAX);
+PCPC_DEFINE(gpu_max     , GPU_MAX     , PM_QOS_MIN);
+PCPC_DEFINE(gpu_min     , GPU_MIN     , PM_QOS_MAX);
 
 static struct pm_qos_object *pm_qos_array[] = {
 	&null_pm_qos,
@@ -136,6 +168,18 @@ static struct pm_qos_object *pm_qos_array[] = {
 	&network_lat_pm_qos,
 	&network_throughput_pm_qos,
 	&memory_bandwidth_pm_qos,
+	&PCPC_NAME_PM_QOS(lit_maxf    ),
+	&PCPC_NAME_PM_QOS(big_maxf    ),
+	&PCPC_NAME_PM_QOS(prim_maxf   ),
+	&PCPC_NAME_PM_QOS(lit_minf    ),
+	&PCPC_NAME_PM_QOS(big_minf    ),
+	&PCPC_NAME_PM_QOS(prim_minf   ),
+	&PCPC_NAME_PM_QOS(lit_upcore  ),
+	&PCPC_NAME_PM_QOS(big_upcore  ),
+	&PCPC_NAME_PM_QOS(prim_upcore ),
+	&PCPC_NAME_PM_QOS(bus_min     ),
+	&PCPC_NAME_PM_QOS(gpu_max     ),
+	&PCPC_NAME_PM_QOS(gpu_min     ),
 };
 
 static ssize_t pm_qos_power_write(struct file *filp, const char __user *buf,

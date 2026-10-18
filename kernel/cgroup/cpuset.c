@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  *  kernel/cpuset.c
  *
@@ -1778,6 +1781,182 @@ out_unlock:
 	css_put(&cs->css);
 	flush_workqueue(cpuset_migrate_mm_wq);
 	return retval ?: nbytes;
+}
+
+#define SS_NAME_LEN 20
+#define CPUMASK_LEN 20
+
+static int cpuset_ss_cpus(struct cpuset *cs, cpumask_t cpu_mask)
+{
+	struct cpuset *trialcs;
+	char buf[CPUMASK_LEN] = {0};
+	int retval = -ENODEV;
+
+	snprintf(buf, CPUMASK_LEN, "%*pbl", cpumask_pr_args(&cpu_mask));
+
+	css_get(&cs->css);
+	flush_work(&cpuset_hotplug_work);
+
+	mutex_lock(&cpuset_mutex);
+	if (!is_cpuset_online(cs))
+		goto out_unlock;
+
+	trialcs = alloc_trial_cpuset(cs);
+	if (!trialcs) {
+		retval = -ENOMEM;
+		goto out_unlock;
+	}
+
+	retval = update_cpumask(cs, trialcs, buf);
+
+	free_trial_cpuset(trialcs);
+out_unlock:
+	mutex_unlock(&cpuset_mutex);
+	css_put(&cs->css);
+	return retval;
+}
+
+int cpuset_set_group_cpus(
+	cpumask_t ta_cpu_mask,
+	cpumask_t fg_cpu_mask,
+	cpumask_t bg_cpu_mask,
+	cpumask_t sb_cpu_mask,
+	cpumask_t ad_cpu_mask,
+	cpumask_t cd_cpu_mask,
+	cpumask_t rs_cpu_mask
+)
+{
+	struct cpuset *ta_cs = NULL;
+	struct cpuset *fg_cs = NULL;
+	struct cpuset *fb_cs = NULL;
+	struct cpuset *bg_cs = NULL;
+	struct cpuset *sb_cs = NULL;
+	struct cpuset *ad_cs = NULL;
+	struct cpuset *cd_cs = NULL;
+	struct cpuset *rs_cs = NULL;
+	struct cpuset *cs;
+	struct cgroup_subsys_state *pos_css;
+	struct cgroup_subsys_state *child_pos_css;
+	char name[SS_NAME_LEN] = {0};
+	bool need_fg_up = false;
+	cpumask_t fg_up_cpumask = CPU_MASK_NONE;
+	int retval = 0;
+
+	rcu_read_lock();
+	cpuset_for_each_child(cs, pos_css, &top_cpuset) {
+		memset(&name, 0, sizeof(name));
+		cgroup_name(cs->css.cgroup, name, SS_NAME_LEN);
+		if (!strcmp(name, "top-app")) {
+			ta_cs = cs;
+			cpuset_for_each_child(cs, child_pos_css, ta_cs) {
+				pr_err("");
+				pr_cont_cgroup_path(cs->css.cgroup);
+				pr_cont(" is unknown group!!\n");
+				retval = -EINVAL;
+			}
+		} else if (!strcmp(name, "foreground")) {
+			fg_cs = cs;
+			cpuset_for_each_child(cs, child_pos_css, fg_cs) {
+				memset(&name, 0, sizeof(name));
+				cgroup_name(cs->css.cgroup, name, SS_NAME_LEN);
+				if (!strcmp(name, "boost")) {
+					fb_cs = cs;
+				} else {
+					pr_err("");
+					pr_cont_cgroup_path(cs->css.cgroup);
+					pr_cont(" is unknown group!!\n");
+					retval = -EINVAL;
+				}
+			}
+			if (!cpumask_subset(&fg_cpu_mask, fg_cs->cpus_requested)) {
+				need_fg_up = true;
+				cpumask_or(&fg_up_cpumask, &fg_cpu_mask, fg_cs->cpus_requested);
+			}
+		} else if (!strcmp(name, "background")) {
+			bg_cs = cs;
+			cpuset_for_each_child(cs, child_pos_css, bg_cs) {
+				pr_err("");
+				pr_cont_cgroup_path(cs->css.cgroup);
+				pr_cont(" is unknown group!!\n");
+				retval = -EINVAL;
+			}
+		} else if (!strcmp(name, "system-background")) {
+			sb_cs = cs;
+			cpuset_for_each_child(cs, child_pos_css, sb_cs) {
+				pr_err("");
+				pr_cont_cgroup_path(cs->css.cgroup);
+				pr_cont(" is unknown group!!\n");
+				retval = -EINVAL;
+			}
+		} else if (!strcmp(name, "audio-app")) {
+			ad_cs = cs;
+			cpuset_for_each_child(cs, child_pos_css, ad_cs) {
+				pr_err("");
+				pr_cont_cgroup_path(cs->css.cgroup);
+				pr_cont(" is unknown group!!\n");
+				retval = -EINVAL;
+			}
+		} else if (!strcmp(name, "camera-daemon")) {
+			cd_cs = cs;
+			cpuset_for_each_child(cs, child_pos_css, cd_cs) {
+				pr_err("");
+				pr_cont_cgroup_path(cs->css.cgroup);
+				pr_cont(" is unknown group!!\n");
+				retval = -EINVAL;
+			}
+		} else if (!strcmp(name, "restricted")) {
+			/* special cpuset for screen off restrictions */
+			rs_cs = cs;
+			cpuset_for_each_child(cs, child_pos_css, rs_cs) {
+				pr_err("");
+				pr_cont_cgroup_path(cs->css.cgroup);
+				pr_cont(" is unknown group!!\n");
+				retval = -EINVAL;
+			}
+		} else {
+			pr_err("");
+			pr_cont_cgroup_path(cs->css.cgroup);
+			pr_cont(" is unknown group!!\n");
+			/* retval = -EINVAL; */
+		}
+	}
+	rcu_read_unlock();
+
+	if (retval < 0)
+		return retval;
+
+	if ((ta_cs == NULL) || (fg_cs == NULL) ||
+	    (bg_cs == NULL) || (sb_cs == NULL) ||
+	    (ad_cs == NULL) || (cd_cs == NULL) || (rs_cs == NULL)) {
+		pr_err("%s%s%s%s%s%s%s group is not found!!\n",
+		(ta_cs == NULL) ? " top-app " : "",
+		(fg_cs == NULL) ? " foreground " : "",
+		(bg_cs == NULL) ? " background " : "",
+		(sb_cs == NULL) ? " system-background " : "",
+		(ad_cs == NULL) ? " audio-app " : "",
+		(cd_cs == NULL) ? " camera-daemon " : "",
+		(rs_cs == NULL) ? " restricted " : "");
+		return -ENOENT;
+	}
+
+	cpuset_ss_cpus(ta_cs, ta_cpu_mask);
+
+	if (fb_cs != NULL) {
+		if (need_fg_up) {
+			cpuset_ss_cpus(fg_cs, fg_up_cpumask);
+			cpuset_ss_cpus(fb_cs, fg_up_cpumask);
+		}
+		cpuset_ss_cpus(fb_cs, fg_cpu_mask);
+	}
+	cpuset_ss_cpus(fg_cs, fg_cpu_mask);
+
+	cpuset_ss_cpus(bg_cs, bg_cpu_mask);
+	cpuset_ss_cpus(sb_cs, sb_cpu_mask);
+	cpuset_ss_cpus(ad_cs, ad_cpu_mask);
+	cpuset_ss_cpus(cd_cs, cd_cpu_mask);
+	cpuset_ss_cpus(rs_cs, rs_cpu_mask);
+
+	return retval;
 }
 
 /*

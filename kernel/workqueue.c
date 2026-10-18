@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * kernel/workqueue.c - generic async execution with shared worker pool
  *
@@ -55,6 +58,10 @@
 
 #include "workqueue_internal.h"
 
+#define WQ_DEBUG
+#ifdef WQ_DEBUG
+#define DETECT_TIME 100
+#endif
 enum {
 	/*
 	 * worker_pool flags
@@ -2095,6 +2102,9 @@ __acquires(&pool->lock)
 	bool cpu_intensive = pwq->wq->flags & WQ_CPU_INTENSIVE;
 	int work_color;
 	struct worker *collision;
+#ifdef WQ_DEBUG
+	unsigned long start_time = 0, end_time = 0, diff_time = 0;
+#endif
 #ifdef CONFIG_LOCKDEP
 	/*
 	 * It is permissible to free the struct work_struct from
@@ -2193,7 +2203,20 @@ __acquires(&pool->lock)
 	 */
 	lockdep_invariant_state(true);
 	trace_workqueue_execute_start(work);
+#ifdef WQ_DEBUG
+	if (pwq->wq == system_wq)
+		start_time = jiffies;
+#endif
 	worker->current_func(work);
+#ifdef WQ_DEBUG
+	if (pwq->wq == system_wq) {
+		end_time = jiffies;
+		diff_time = jiffies_to_msecs((long)end_time - (long)start_time);
+
+		if (diff_time > DETECT_TIME)
+			printk("wq exec time: %lu ms(%pf)\n", diff_time, worker->current_func);
+	}
+#endif
 	/*
 	 * While we must be careful to not use "work" after this, the trace
 	 * point will only record its address.

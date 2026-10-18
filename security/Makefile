@@ -1,3 +1,6 @@
+# ------------------------------------------------------------------
+# (C) 2021 FCNT LIMITED
+# ------------------------------------------------------------------
 # SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for the kernel security code
@@ -26,6 +29,7 @@ obj-$(CONFIG_SECURITY_SMACK)		+= smack/
 obj-$(CONFIG_AUDIT)			+= lsm_audit.o
 obj-$(CONFIG_SECURITY_TOMOYO)		+= tomoyo/
 obj-$(CONFIG_SECURITY_APPARMOR)		+= apparmor/
+obj-$(CONFIG_SECURITY_FJSEC)		+= fjsec.o
 obj-$(CONFIG_SECURITY_YAMA)		+= yama/
 obj-$(CONFIG_SECURITY_LOADPIN)		+= loadpin/
 obj-$(CONFIG_SECURITY_SAFESETID)       += safesetid/

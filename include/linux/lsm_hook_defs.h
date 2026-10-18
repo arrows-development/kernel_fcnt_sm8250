@@ -369,6 +369,11 @@ LSM_HOOK(void, LSM_RET_VOID, bpf_prog_free_security, struct bpf_prog_aux *aux)
 
 LSM_HOOK(int, 0, locked_down, enum lockdown_reason what)
 
+#ifdef CONFIG_SECURITY_FJSEC
+LSM_HOOK(int, 0, task_fix_setgid, struct cred *new, const struct cred *old,
+	 int flags)
+#endif /* CONFIG_SECURITY_FJSEC */
+
 #ifdef CONFIG_PERF_EVENTS
 LSM_HOOK(int, 0, perf_event_open, struct perf_event_attr *attr, int type)
 LSM_HOOK(int, 0, perf_event_alloc, struct perf_event *event)

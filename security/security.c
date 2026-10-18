@@ -1,3 +1,6 @@
+/*------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*------------------------------------------------------------------*/
 /*
  * Security plug functions
  *
@@ -1656,6 +1659,16 @@ int security_task_fix_setuid(struct cred *new, const struct cred *old,
 			     int flags)
 {
 	return call_int_hook(task_fix_setuid, 0, new, old, flags);
+}
+
+int security_task_fix_setgid(struct cred *new, const struct cred *old,
+			     int flags)
+{
+#ifdef CONFIG_SECURITY_FJSEC
+	return call_int_hook(task_fix_setgid, 0, new, old, flags);
+#else /* CONFIG_SECURITY_FJSEC */
+	return 0;
+#endif /* CONFIG_SECURITY_FJSEC */
 }
 
 int security_task_setpgid(struct task_struct *p, pid_t pgid)

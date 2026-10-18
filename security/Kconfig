@@ -1,4 +1,6 @@
 #
+# (C) 2021 FCNT LIMITED
+#
 # Security configuration
 #
 
@@ -242,6 +244,267 @@ source security/safesetid/Kconfig
 source security/lockdown/Kconfig
 
 source security/integrity/Kconfig
+
+config SECURITY_FJSEC
+	bool "FJSEC LSM Support"
+	depends on SECURITY
+	help
+	  This is a FJSEC LSM module.
+
+	  If you are unsure how to answer this question, answer N.
+
+config SECURITY_FJSEC_AC_SECURE_STORAGE
+	bool "Enable access control to secure storage."
+	depends on SECURITY_FJSEC
+	default y
+
+config SECURITY_FJSEC_AC_KITTING
+	bool "Enable access control to Kitting directory and partition."
+	depends on SECURITY_FJSEC
+	default n
+
+config SECURITY_FJSEC_DISK_DEV_PATH
+	string "block device path for main disk"
+	depends on SECURITY_FJSEC
+	default "/dev/block/sda"
+
+config SECURITY_FJSEC_DISK_DEV_PATH_2
+	string "block device path for main disk"
+	depends on SECURITY_FJSEC
+	default "/dev/block/sdb"
+
+config SECURITY_FJSEC_DISK_DEV_PATH_3
+	string "block device path for main disk"
+	depends on SECURITY_FJSEC
+	default "/dev/block/sdc"
+
+config SECURITY_FJSEC_DISK_DEV_PATH_4
+	string "block device path for main disk"
+	depends on SECURITY_FJSEC
+	default "/dev/block/sdd"
+
+config SECURITY_FJSEC_DISK_DEV_PATH_5
+	string "block device path for main disk"
+	depends on SECURITY_FJSEC
+	default "/dev/block/sde"
+
+config SECURITY_FJSEC_DISK_DEV_PATH_6
+	string "block device path for main disk"
+	depends on SECURITY_FJSEC
+	default "/dev/block/sdf"
+
+config SECURITY_FJSEC_SYSTEM_DIR_PATH
+	string "system directory PATH"
+	depends on SECURITY_FJSEC
+	default "/system/"
+
+config SECURITY_FJSEC_SECURE_STORAGE_DIR_PATH
+	string "secure storage PATH"
+	depends on SECURITY_FJSEC_AC_SECURE_STORAGE
+	default "/mnt/vendor/persist/data/"
+
+config SECURITY_FJSEC_SECURE_STORAGE_MOUNT_POINT_PATH
+	string "secure storage mount point PATH"
+	depends on SECURITY_FJSEC_AC_SECURE_STORAGE
+	default "/mnt/vendor/persist/"
+
+config SECURITY_FJSEC_KITTING_DIR_PATH
+	string "kitting directory PATH"
+	depends on SECURITY_FJSEC_AC_KITTING
+	default "/mnt/kitting/"
+
+config SECURITY_FJSEC_VENDOR_DIR_PATH
+	string "vendor directory PATH"
+	depends on SECURITY_FJSEC
+	default "/vendor/"
+
+config SECURITY_FJSEC_VENDOR_DEV_PATH
+	string "block device path for /vendor/"
+	depends on SECURITY_FJSEC
+	default "/dev/block/sda8"
+
+config SECURITY_FJSEC_SYSTEM_DEV_PATH
+	string "block device path for /system/"
+	depends on SECURITY_FJSEC
+	default "/dev/block/sda8"
+
+config SECURITY_FJSEC_SECURE_STORAGE_DEV_PATH
+	string "block device path for secure storage"
+	depends on SECURITY_FJSEC_AC_SECURE_STORAGE
+	default "/dev/block/sda2"
+
+config SECURITY_FJSEC_KITTING_DEV_PATH
+	string "block device path for /kitting/"
+	depends on SECURITY_FJSEC_AC_KITTING
+	default "/dev/block/by-name/kitting"
+
+config SECURITY_FJSEC_DM_DEV_PATH
+	string "block device path for device-mapper feature"
+	depends on SECURITY_FJSEC
+	default "/dev/block/dm-"
+
+config SECURITY_FJSEC_SYSTEM_AS_ROOT
+	bool "device supports system_as_root"
+	depends on SECURITY_FJSEC
+	default n
+
+config SECURITY_FJSEC_FELICA_DEV_PATH
+	string "device path for FeliCa"
+	depends on SECURITY_FJSEC
+	default "/dev/cxd224x-i2c"
+
+config SECURITY_FJSEC_FELICA_DEV2_PATH
+	string "device path for FeliCa"
+	depends on SECURITY_FJSEC
+	default "/dev/felica"
+
+config SECURITY_FJSEC_NFC_DEV_PATH
+	string "device path for NFC"
+	depends on SECURITY_FJSEC
+	default "/dev/snfc_uart"
+
+config SECURITY_FJSEC_PROTECT_CHROOT
+	bool "Enable fjsec_path_chroot()"
+	depends on SECURITY_FJSEC && SECURITY_PATH
+	default y
+
+config SECURITY_FJSEC_CHROOT_PATH
+	string "chroot() allow PATH"
+	depends on SECURITY_FJSEC && SECURITY_PATH && SECURITY_FJSEC_PROTECT_CHROOT
+	default ""
+	help
+	  This is a list of paths to allow chroot()
+	  For example "/chroot/:/security/"
+
+config SECURITY_FJSEC_SECURE_STORAGE_ACCESS_PROCESS_NAME
+	string "Accessible process name to SFS"
+	depends on SECURITY_FJSEC_AC_SECURE_STORAGE
+	default "qseecomd"
+
+config SECURITY_FJSEC_SECURE_STORAGE_ACCESS_PROCESS_PATH
+	string "Accessible process path to SFS"
+	depends on SECURITY_FJSEC_AC_SECURE_STORAGE
+	default "/vendor/bin/qseecomd"
+
+config SECURITY_FJSEC_KEYMASTER_PROCESS_NAME
+	string "Accessible process name to SFS"
+	depends on SECURITY_FJSEC_AC_SECURE_STORAGE
+	default "Keymasterkey_provd"
+
+config SECURITY_FJSEC_KEYMASTER_PROCESS_PATH
+	string "Accessible process path to SFS"
+	depends on SECURITY_FJSEC_AC_SECURE_STORAGE
+	default "/system/bin/Keymasterkey_provd"
+
+config SECURITY_FJSEC_KMINSTALL_PROCESS_NAME
+	string "Accessible process name to SFS"
+	depends on SECURITY_FJSEC_AC_SECURE_STORAGE
+	default "KmInstallKeybox"
+
+config SECURITY_FJSEC_KMINSTALL_PROCESS_PATH
+	string "Accessible process path to SFS"
+	depends on SECURITY_FJSEC_AC_SECURE_STORAGE
+	default "/vendor/bin/KmInstallKeybox"
+
+config SECURITY_FJSEC_FOTA_MODE_ACCESS_PROCESS_NAME
+	string "Accessible process name to /system/, /sst/ in FOTA mode"
+	depends on SECURITY_FJSEC
+	default "recovery"
+
+config SECURITY_FJSEC_FOTA_MODE_ACCESS_PROCESS_PATH
+	string "Accessible process path to /system/, /sst/ in FOTA mode"
+	depends on SECURITY_FJSEC
+	default "/sbin/recovery"
+
+config SECURITY_FJSEC_SDDOWNLOADER_MODE_ACCESS_PROCESS_NAME
+	string "Accessible process name to /system/, /sst/ in SD Downloader mode"
+	depends on SECURITY_FJSEC
+	default "recovery"
+
+config SECURITY_FJSEC_SDDOWNLOADER_MODE_ACCESS_PROCESS_PATH
+	string "Accessible process path to /system/, /sst/ in SD Downloader mode"
+	depends on SECURITY_FJSEC
+	default "/sbin/recovery"
+
+config SECURITY_FJSEC_SDDOWNLOADER_MODE_ACCESS_PROCESS_MK2FS_NAME
+	string "Accessible process name to /system/, /sst/ in SD Downloader mode"
+	depends on SECURITY_FJSEC
+	default "mke2fs"
+
+config SECURITY_FJSEC_SDDOWNLOADER_MODE_ACCESS_PROCESS_MK2FS_PATH
+	string "Accessible process path to /system/, /sst/ in SD Downloader mode"
+	depends on SECURITY_FJSEC
+	default "/system/bin/mke2fs"
+
+config SECURITY_FJSEC_FSCK_PROCESS_NAME
+	string "Process name of fsck"
+	depends on SECURITY_FJSEC
+	default "e2fsck"
+
+config SECURITY_FJSEC_FSCK_PROCESS_PATH
+	string "Process path of fsck"
+	depends on SECURITY_FJSEC
+	default "/system/bin/e2fsck"
+
+config SECURITY_FJSEC_RECOVERY_MODE_ACCESS_PROCESS_NAME
+	string "Accessible process name to /sst/ in recovery mode"
+	depends on SECURITY_FJSEC
+	default "recovery"
+
+config SECURITY_FJSEC_RECOVERY_MODE_ACCESS_PROCESS_PATH
+	string "Accessible process path to /sst/ in recovery mode"
+	depends on SECURITY_FJSEC
+	default "/sbin/recovery"
+
+config SECURITY_FJSEC_OSUPDATE_MODE_ACCESS_PROCESS_NAME
+	string "Accessible process name to mmcdl device in OS update mode"
+	depends on SECURITY_FJSEC
+	default "recovery"
+
+config SECURITY_FJSEC_OSUPDATE_MODE_ACCESS_PROCESS_PATH
+	string "Accessible process path to mmcdl device in OS update mode"
+	depends on SECURITY_FJSEC
+	default "/sbin/recovery"
+
+config SECURITY_MMAP_DISABLE
+	bool "disable fjsec_check_mapping()"
+	depends on SECURITY_FJSEC
+
+
+config SECURITY_FJSEC_FIRMWARE_DEV_PATH
+	string "block device path for /vendor/firmware_mnt/"
+	depends on SECURITY_FJSEC_AC_FIRMWARE
+	default "/dev/block/sde4"
+
+config SECURITY_FJSEC_FIRMWARE_DIR_PATH
+	string "firmware directory PATH"
+	depends on SECURITY_FJSEC_AC_FIRMWARE
+	default "/vendor/firmware_mnt/"
+
+config SECURITY_FJSEC_AC_FIRMWARE
+	bool "Enable access control to fiwmware_mnt directory and partition."
+	depends on SECURITY_FJSEC
+	default y
+
+config SECURITY_FJSEC_DSP_DEV_PATH
+	string "block device path for /vendor/dsp/"
+	depends on SECURITY_FJSEC_AC_DSP
+	default "/dev/block/sde9"
+
+config SECURITY_FJSEC_DSP_DIR_PATH
+	string "dsp directory PATH"
+	depends on SECURITY_FJSEC_AC_DSP
+	default "/vendor/dsp/"
+
+config SECURITY_FJSEC_AC_DSP
+	bool "Enable access control to dsp directory and partition."
+	depends on SECURITY_FJSEC
+	default y
+config SECURITY_FJSEC_FRP_DEV_PATH
+	string "block device path for /frp/"
+	depends on SECURITY_FJSEC
+	default "/dev/block/sda7"
+
 
 choice
 	prompt "First legacy 'major LSM' to be initialized"

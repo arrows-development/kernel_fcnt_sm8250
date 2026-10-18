@@ -1,3 +1,6 @@
+/*------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*------------------------------------------------------------------*/
 /*
  * Linux Security plug
  *
@@ -376,6 +379,8 @@ int security_kernel_read_file(struct file *file, enum kernel_read_file_id id);
 int security_kernel_post_read_file(struct file *file, char *buf, loff_t size,
 				   enum kernel_read_file_id id);
 int security_task_fix_setuid(struct cred *new, const struct cred *old,
+			     int flags);
+int security_task_fix_setgid(struct cred *new, const struct cred *old,
 			     int flags);
 int security_task_setpgid(struct task_struct *p, pid_t pgid);
 int security_task_getpgid(struct task_struct *p);
@@ -1013,6 +1018,13 @@ static inline int security_task_fix_setuid(struct cred *new,
 					   int flags)
 {
 	return cap_task_fix_setuid(new, old, flags);
+}
+
+static inline int security_task_fix_setgid(struct cred *new,
+					   const struct cred *old,
+					   int flags)
+{
+	return 0;
 }
 
 static inline int security_task_setpgid(struct task_struct *p, pid_t pgid)

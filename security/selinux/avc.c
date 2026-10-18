@@ -86,6 +86,16 @@ struct avc_callback_node {
 DEFINE_PER_CPU(struct avc_cache_stats, avc_cache_stats) = { 0 };
 #endif
 
+#define BOOT_ARGS_MODE_QMMI "ffbm-02"
+#define BOOT_ARGS_MODE_REPAIR "repair"
+
+enum boot_mode_type {
+	BOOT_MODE_NONE = 0,
+	BOOT_MODE_QMMI = 1,
+	BOOT_MODE_REPAIR = 2,
+};
+
+
 struct selinux_avc {
 	unsigned int avc_cache_threshold;
 	struct avc_cache avc_cache;
@@ -123,6 +133,22 @@ static struct kmem_cache *avc_node_cachep;
 static struct kmem_cache *avc_xperms_data_cachep;
 static struct kmem_cache *avc_xperms_decision_cachep;
 static struct kmem_cache *avc_xperms_cachep;
+
+static enum boot_mode_type boot_mode = BOOT_MODE_NONE;
+
+static int __init avc_get_mode(char *str)
+{
+	if (strcmp(str, BOOT_ARGS_MODE_QMMI) == 0) {
+		boot_mode = BOOT_MODE_QMMI;
+	} else if (strcmp(str, BOOT_ARGS_MODE_REPAIR) == 0) {
+		boot_mode = BOOT_MODE_REPAIR;
+	}
+
+
+//	dprintk(KERN_INFO "boot mode=<%d>\n", boot_mode);
+	return 0;
+}
+early_param("androidboot.mode", avc_get_mode);
 
 static inline int avc_hash(u32 ssid, u32 tsid, u16 tclass)
 {
@@ -761,6 +787,80 @@ static void avc_audit_post_callback(struct audit_buffer *ab, void *a)
 	}
 }
 
+static char* permit_list[] = {
+"uncrypt",
+""
+};
+
+#if defined(FJFEAT_AIRMONKEY)
+static unsigned int is_amts = 1;
+#else
+static unsigned int is_amts = 0;
+#endif
+
+#define dprintk(...)
+
+static int check_process_name_tail(char *process_name) {
+	char *check_process_name;
+	int process_name_len;
+
+	process_name_len = strlen(process_name);
+	check_process_name = process_name;
+
+	if (process_name_len > (TASK_COMM_LEN - 1)) {
+		check_process_name += (process_name_len - (TASK_COMM_LEN - 1));
+	}
+
+	if (strcmp(current->group_leader->comm, check_process_name)==0) {
+		return 0;
+	}
+	return -1;
+}
+
+static int check_second(void) {
+	unsigned int i = 0;
+	char* acl_name = permit_list[0];
+	if( boot_mode == BOOT_MODE_QMMI || is_amts || boot_mode == BOOT_MODE_REPAIR ) {
+			dprintk(KERN_INFO "%s:%d: all access permit is_amts=%u\n", __FUNCTION__, __LINE__, is_amts);
+			return 0;
+	}
+
+	for (; strcmp(acl_name, "") != 0; ) {
+		if (check_process_name_tail(acl_name) == 0) {
+			dprintk(KERN_INFO "%s:%d: end comm=%s group_comm=%s, is_amts=%u\n", __FUNCTION__, __LINE__,current->comm, current->group_leader->comm, is_amts);
+			return 0;
+		}
+		acl_name = permit_list[++i];
+	}
+	dprintk(KERN_INFO "%s:%d: access denied comm=%s group_comm=%s\n", __FUNCTION__, __LINE__, current->comm, current->group_leader->comm);
+	return -1;
+}
+
+static void set_full_audited(struct selinux_audit_data* sad)
+{
+	// filter out the necessary caller...(todo)
+	if(sad && sad->denied) {
+
+		// check the caller
+		if( !check_second() ) {
+			sad->denied = 0;
+		}
+	}
+}
+
+static int set_full_audited_from_denied(u32 denied)
+{
+	// filter out the necessary caller...(todo)
+	if(denied) {
+		// check the caller
+		if( !check_second() ) {
+			return 0;
+		}
+	} else return 0;
+	return -EPERM;
+}
+
+
 /* This is the slow part of avc audit with big stack footprint */
 noinline int slow_avc_audit(struct selinux_state *state,
 			    u32 ssid, u32 tsid, u16 tclass,
@@ -783,6 +883,7 @@ noinline int slow_avc_audit(struct selinux_state *state,
 	sad.denied = denied;
 	sad.result = result;
 	sad.state = state;
+	set_full_audited(&sad);
 
 	a->selinux_audit_data = &sad;
 
@@ -1017,12 +1118,20 @@ static noinline int avc_denied(struct selinux_state *state,
 			       u8 driver, u8 xperm, unsigned int flags,
 			       struct av_decision *avd)
 {
+	u32 denied;
 	if (flags & AVC_STRICT)
 		return -EACCES;
 
 	if (enforcing_enabled(state) &&
 	    !(avd->flags & AVD_FLAGS_PERMISSIVE))
+
+    {
+		denied = requested & ~(avd->allowed);
+		if( set_full_audited_from_denied(denied) ) {
 		return -EACCES;
+		}
+    }
+
 
 	avc_update_node(state->avc, AVC_CALLBACK_GRANT, requested, driver,
 			xperm, ssid, tsid, tclass, avd->seqno, NULL, flags);

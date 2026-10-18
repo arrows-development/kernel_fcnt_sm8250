@@ -1,0 +1,42 @@
+/*
+ * FCNT arrows 5G (F-51A) - Input: GPIO keys and fingerprint finger-detect pin state.
+ *
+ * Reconstructed from the FCNT stock dtbo (kona FFRD REV7 SKU3); FFRD is
+ * derived from the CLO kona QRD board files.
+ */
+
+/*
+ * FCNT pulls the finger-detect line (PM8150 GPIO1, CLO "key_home") down
+ * instead of up. The CLO state lives in kona-pmic-overlay.dtsi and cannot be
+ * edited from an overlay, so provide a separate state for qbt_handler.
+ */
+&pm8150_gpios {
+	fp_detect {
+		fp_detect_default: fp_detect_default {
+			pins = "gpio1";
+			function = "normal";
+			input-enable;
+			bias-pull-down;
+			power-source = <0>;
+		};
+	};
+};
+
+&soc {
+	gpio_keys {
+		compatible = "gpio-keys";
+		label = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&key_vol_up_default>;
+
+		vol_up {
+			label = "volume_up";
+			gpios = <&pm8150_gpios 6 1>;
+			linux,input-type = <1>;
+			linux,code = <115>;
+			gpio-key,wakeup;
+			debounce-interval = <15>;
+			linux,can-disable;
+		};
+	};
+};

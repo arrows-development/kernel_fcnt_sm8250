@@ -1,0 +1,146 @@
+/*
+ * FCNT arrows 5G (F-51A) - NFC: Sony CXD224x on QUP SE3 (the QRD NQ controller on SE1 is disabled).
+ *
+ * Reconstructed from the FCNT stock dtbo (kona FFRD REV7 SKU3); FFRD is
+ * derived from the CLO kona QRD board files.
+ */
+
+&tlmm {
+	cxd224x_rst: cxd224x_rst {
+		mux {
+			pins = "gpio99";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio99";
+			drive-strength = <2>;
+			bias-disable;
+			output-low;
+		};
+	};
+
+	cxd224x_hostint_default: cxd224x_hostint_default {
+		mux {
+			pins = "gpio112";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio112";
+			drive-strength = <2>;
+			bias-pull-down;
+			input-enable;
+		};
+	};
+
+	cxd224x_hostint_active: cxd224x_hostint_active {
+		mux {
+			pins = "gpio112";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio112";
+			drive-strength = <2>;
+			bias-disable;
+			input-enable;
+		};
+	};
+
+	cxd224x_wake_default: cxd224x_wake_default {
+		mux {
+			pins = "gpio71";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio71";
+			drive-strength = <2>;
+			bias-disable;
+			output-low;
+		};
+	};
+
+	cxd224x_wake_active: cxd224x_wake_active {
+		mux {
+			pins = "gpio71";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio71";
+			drive-strength = <2>;
+		};
+	};
+
+	cxd224x_hvdd_default: cxd224x_hvdd_default {
+		mux {
+			pins = "gpio114";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio114";
+			drive-strength = <2>;
+			bias-disable;
+			output-low;
+		};
+	};
+
+	cxd224x_hvdd_active: cxd224x_hvdd_active {
+		mux {
+			pins = "gpio114";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio114";
+			drive-strength = <2>;
+		};
+	};
+};
+
+&qupv3_se1_i2c {
+	status = "disabled";
+	qcom,clk-freq-out = <1000000>;
+	#address-cells = <0x1>;
+	#size-cells = <0x0>;
+
+	nq@28 {
+		compatible = "qcom,nq-nci";
+		reg = <0x28>;
+		status = "disabled";
+		qcom,nq-irq = <&tlmm 111 0>;
+		qcom,nq-ven = <&tlmm 6 0>;
+		qcom,nq-firm = <&tlmm 110 0>;
+		qcom,nq-clkreq = <&tlmm 7 0>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <0x6f 0x0>;
+		interrupt-names = "nfc_irq";
+		pinctrl-names = "nfc_active", "nfc_suspend";
+		pinctrl-0 = <&nfc_int_active &nfc_enable_active &nfc_clk_req_active>;
+		pinctrl-1 = <&nfc_int_suspend &nfc_enable_suspend &nfc_clk_req_suspend>;
+	};
+};
+
+&qupv3_se3_i2c {
+	status = "ok";
+
+	nfc@0x28 {
+		compatible = "sony,cxd224x-i2c";
+		status = "ok";
+		reg = <0x28>;
+		clock-frequency = <400000>;
+		sony,nfc_int = <&tlmm 112 0>;
+		sony,nfc_rst = <&tlmm 99 0>;
+		sony,nfc_wake = <&tlmm 71 0>;
+		sony,nfc_hvdd = <&tlmm 114 0>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <0x70 0x2>;
+		interrupt-names = "nfc_irq";
+		pinctrl-names = "cxd224x_default", "cxd224x_active";
+		pinctrl-0 = <&cxd224x_rst &cxd224x_hostint_default &cxd224x_wake_default &cxd224x_hvdd_default>;
+		pinctrl-1 = <&cxd224x_rst &cxd224x_hostint_active &cxd224x_wake_active &cxd224x_hvdd_active>;
+	};
+};

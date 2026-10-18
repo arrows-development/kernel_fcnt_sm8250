@@ -1,0 +1,32 @@
+/*
+ * FCNT arrows 5G (F-51A) - USB: controllers, PHY tuning and the USB-C redriver.
+ *
+ * Reconstructed from the FCNT stock dtbo (kona FFRD REV7 SKU3); FFRD is
+ * derived from the CLO kona QRD board files.
+ */
+
+&qupv3_se15_i2c {
+	redriver: redriver@1c {
+		compatible = "onnn,redriver";
+		reg = <0x1c>;
+		extcon = <&pm8150b_pdphy &pm8150b_pdphy>;
+		eq = <0x4040404 0x6040406>;
+		flat-gain = <0x3010103 0x2010102>;
+		output-comp = <0x3030303 0x3030303>;
+		loss-match = <0x1030301 0x3030303>;
+	};
+};
+
+&usb0 {
+	dwc3@a600000 {
+		maximum-speed = "super-speed-plus";
+	};
+};
+
+&usb1 {
+	qcom,default-mode-none;
+};
+
+&usb2_phy0 {
+	qcom,param-override-seq = <0xc7 0x6c 0x4 0x70 0x3 0x74>;
+};

@@ -1,0 +1,18 @@
+/*
+ * FCNT arrows 5G (F-51A) - prototype boards (REV1..REV3).
+ *
+ * Include after amaterasu-overlay.dtsi with AMATERASU_PROTO defined: the
+ * charger runs without step charging and the "rev0" battery profiles are
+ * used (see amaterasu-charger.dtsi / amaterasu-battery.dtsi). Touch rails
+ * are set up for the Synaptics controllers used on these boards.
+ */
+
+&pm8150_l13 {
+	regulator-min-microvolt = <3300000>;
+	qcom,init-voltage = <3300000>;
+	qcom,init-mode = <4>;
+};
+
+&pm8150a_l1 {
+	qcom,init-mode = <4>;
+};

@@ -1,0 +1,7 @@
+/*
+ * FCNT arrows 5G (F-51A) - SKU0: no SD card slot.
+ */
+
+&sdhc_2 {
+	status = "disabled";
+};

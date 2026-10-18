@@ -1,0 +1,35 @@
+/*
+ * FCNT arrows 5G (F-51A) board overlay (kona FFRD).
+ *
+ * FCNT's FFRD board files were derived from the CLO kona QRD ones. The
+ * shared CLO overlay files (PMICs, display, audio, thermal) are used as-is
+ * from vendor/qcom; everything board specific (the QRD board/camera files
+ * as modified by FCNT) lives in the units below.
+ *
+ * Variant knobs (define before including this file):
+ *   AMATERASU_PROTO        - REV1..REV3: no step charging, "rev0" batteries
+ *   AMATERASU_NO_FP_DETECT - up to REV5 / R REV0: no finger-detect line
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+
+#include "../../vendor/qcom/kona-pmic-overlay.dtsi"
+#include "../../vendor/qcom/kona-sde-display.dtsi"
+#include "../../vendor/qcom/kona-audio-overlay.dtsi"
+#include "../../vendor/qcom/kona-thermal-overlay.dtsi"
+
+#include "amaterasu-display.dtsi"
+#include "amaterasu-touch.dtsi"
+#include "amaterasu-camera-pinctrl.dtsi"
+#include "amaterasu-camera.dtsi"
+#include "amaterasu-input.dtsi"
+#include "amaterasu-fingerprint.dtsi"
+#include "amaterasu-regulator.dtsi"
+#include "amaterasu-charger.dtsi"
+#include "amaterasu-battery.dtsi"
+#include "amaterasu-thermal.dtsi"
+#include "amaterasu-audio.dtsi"
+#include "amaterasu-nfc.dtsi"
+#include "amaterasu-usb.dtsi"
+#include "amaterasu-storage.dtsi"
+#include "amaterasu-peripherals.dtsi"

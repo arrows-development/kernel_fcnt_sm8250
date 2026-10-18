@@ -1,0 +1,101 @@
+/*
+ * FCNT arrows 5G (F-51A) - Touch: Parade TrueTouch (pt_i2c_adapter) on QUP SE13.
+ *
+ * Reconstructed from the FCNT stock dtbo (kona FFRD REV7 SKU3); FFRD is
+ * derived from the CLO kona QRD board files.
+ */
+
+&tlmm {
+	ts_pt_int_pin {
+		ts_pt_int_default: ts_pt_int_default {
+			mux {
+				pins = "gpio39";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio39";
+				drive-strength = <2>;
+				output-low;
+				bias-disable;
+			};
+		};
+	};
+
+	ts_pt_rst_pin {
+		ts_pt_rst_default: ts_pt_rst_default {
+			mux {
+				pins = "gpio38";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio38";
+				drive-strength = <2>;
+				output-low;
+				bias-disable;
+			};
+		};
+	};
+};
+
+&qupv3_se13_i2c {
+	#address-cells = <0x1>;
+	#size-cells = <0x0>;
+	status = "ok";
+	qcom,i2c-touch-active = "parade,pt_i2c_adapter";
+
+	st_fts@49 {
+		compatible = "st,fts";
+		reg = <0x49>;
+		status = "disabled";
+		interrupt-parent = <&tlmm>;
+		interrupts = <0x27 0x2008>;
+		vdd-supply = <&pm8150a_l1>;
+		avdd-supply = <&pm8150_l13>;
+		pinctrl-names = "pmx_ts_active", "pmx_ts_suspend";
+		pinctrl-0 = <&ts_active>;
+		pinctrl-1 = <&ts_int_suspend &ts_reset_suspend>;
+		st,irq-gpio = <&tlmm 39 8200>;
+		st,reset-gpio = <&tlmm 38 0>;
+		st,regulator_dvdd = "vdd";
+		st,regulator_avdd = "avdd";
+		panel = <&dsi_sw43404_amoled_cmd &dsi_sw43404_amoled_video &dsi_sw43404_amoled_fhd_plus_cmd>;
+	};
+
+	tsc@24 {
+		compatible = "parade,pt_i2c_adapter";
+		reg = <0x24>;
+		status = "ok";
+		interrupt-parent = <&tlmm>;
+		interrupts = <0x27 0x2>;
+		parade,adapter_id = "pt_i2c_adapter";
+		dvdd-supply = <&pm8150a_l1>;
+		avdd-supply = <&pm8150_l13>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_pt_int_default &ts_pt_rst_default>;
+		panel = <&dsi_nt37800_amoled_wqhdp_cmd>;
+
+		parade,core {
+			parade,name = "pt_core";
+			dvdd_voltage = <1800000>;
+			avdd_voltage = <3100000>;
+			dvdd_uA = <100000>;
+			avdd_uA = <100000>;
+			parade,irq_gpio = <&tlmm 39 0>;
+			parade,rst_gpio = <&tlmm 38 0>;
+			parade,hid_desc_register = <1>;
+			parade,flags = <4>;
+			parade,easy_wakeup_gesture = <0>;
+			parade,config_dut_generation = <2>;
+			parade,watchdog_force_stop = <0>;
+
+			parade,mt {
+				parade,name = "pt_mt";
+				parade,inp_dev_name = "pt_mt";
+				parade,flags = <0>;
+				parade,abs = <0x35 0x0 0x5a0 0x0 0x0 0x36 0x0 0xc30 0x0 0x0 0x3a 0x0 0xff 0x0 0x0 0xffff 0x0 0xff 0x0 0x0 0x39 0x0 0xf 0x0 0x0 0x30 0x0 0xff 0x0 0x0 0x31 0x0 0xff 0x0 0x0 0x34 0xffffff81 0x7f 0x0 0x0 0x37 0x0 0x0 0x0 0x0 0x19 0x0 0xff 0x0 0x0>;
+			};
+		};
+	};
+};

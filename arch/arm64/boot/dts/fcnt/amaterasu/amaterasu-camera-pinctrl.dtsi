@@ -1,0 +1,59 @@
+/*
+ * FCNT arrows 5G (F-51A) - Camera pinctrl: VL53L1 ToF interrupt/reset pins.
+ *
+ * Reconstructed from the FCNT stock dtbo (kona FFRD REV7 SKU3); FFRD is
+ * derived from the CLO kona QRD board files.
+ */
+
+&tlmm {
+	cam_tof_int_active: cam_tof_int_active {
+		mux {
+			pins = "gpio64";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio64";
+			bias-disable;
+			input-enable;
+		};
+	};
+
+	cam_tof_int_suspend: cam_tof_int_suspend {
+		mux {
+			pins = "gpio64";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio64";
+			bias-disable;
+		};
+	};
+
+	cam_tof_reset_active: cam_tof_reset_active {
+		mux {
+			pins = "gpio62";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio62";
+			drive-strength = <2>;
+			output-high;
+		};
+	};
+
+	cam_tof_reset_suspend: cam_tof_reset_suspend {
+		mux {
+			pins = "gpio62";
+			function = "gpio";
+		};
+
+		config {
+			pins = "gpio62";
+			drive-strength = <2>;
+			output-low;
+		};
+	};
+};

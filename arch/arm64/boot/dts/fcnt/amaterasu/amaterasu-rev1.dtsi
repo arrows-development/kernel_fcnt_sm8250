@@ -1,0 +1,19 @@
+/*
+ * FCNT arrows 5G (F-51A) - REV1: FHD+ panel by default and reduced
+ * charge voltage/current limits.
+ */
+
+&spmi_bus {
+	qcom,pm8150b@2 {
+		qcom,qpnp-smb5 {
+			qcom,fv-max-uv = <4320000>;
+			qcom,fcc-max-ua = <1500000>;
+		};
+	};
+};
+
+&soc {
+	qcom,dsi-display-primary {
+		qcom,dsi-default-panel = <&dsi_nt37800_amoled_cmd>;
+	};
+};

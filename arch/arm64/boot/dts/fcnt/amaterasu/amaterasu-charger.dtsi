@@ -1,0 +1,158 @@
+/*
+ * FCNT arrows 5G (F-51A) - Charger: SMB5, USB-PD sink caps, SMB1390 (disabled) and FCNT oem_charger_drv.
+ *
+ * Reconstructed from the FCNT stock dtbo (kona FFRD REV7 SKU3); FFRD is
+ * derived from the CLO kona QRD board files.
+ */
+
+&pm8150b_charger {
+	qcom,thermal-mitigation = <5325000 4500000 4000000 3500000 3000000 2500000 2000000 1500000 1000000 500000>;
+	status = "ok";
+	qcom,sec-charger-config = <0x1>;
+	qcom,auto-recharge-soc = <98>;
+	io-channels = <&pm8150b_vadc 30 &pm8150b_vadc 7 &pm8150b_vadc 153 &pm8150b_vadc 131 &pm8150b_vadc 9 &pm8150b_vadc 8>;
+	io-channel-names = "mid_voltage", "usb_in_current", "sbux_res", "vph_voltage", "chg_temp", "usb_in_voltage";
+	qcom,battery-data = <&kona_qrd_batterydata>;
+	qcom,wd-bark-time-secs = <16>;
+	qcom,suspend-input-on-debug-batt;
+	qcom,fcc-stepping-enable;
+	qcom,smb-internal-pull-kohm = <0>;
+#ifndef AMATERASU_PROTO
+	qcom,step-charging-enable;
+#endif
+	qcom,hvdcp-disable;
+	qcom,float-option = <2>;
+	qcom,chg-term-current-ma = <(-300)>;
+};
+
+&pm8150b_pdphy {
+	qcom,default-sink-caps = <5000 3000 9000 3000>;
+};
+
+&soc {
+	oem_charger_drv: oem_charger_drv {
+		compatible = "fcnt,oem_charger_drv";
+		status = "ok";
+		#cooling-cells = <0x2>;
+		fcnt,usb5v-soft-icl-low-supply-volt-uv = <4400000>;
+		fcnt,usb5v-soft-icl-high-supply-volt-uv = <4500000>;
+		fcnt,usb5v-under-supply-volt-uv = <4000000>;
+		fcnt,usb5v-over-supply-volt-uv = <6400000>;
+		fcnt,usb9v-under-supply-volt-uv,1st = <8400000>;
+		fcnt,usb9v-under-supply-volt-uv,2nd = <8180000>;
+		fcnt,usb9v-over-supply-volt-uv = <11000000>;
+		fcnt,holder5v-under-supply-volt-uv = <4000000>;
+		fcnt,holder5v-over-supply-volt-uv = <6400000>;
+		fcnt,holder9v-under-supply-volt-uv,1st = <8500000>;
+		fcnt,holder9v-under-supply-volt-uv,2nd = <8180000>;
+		fcnt,holder9v-over-supply-volt-uv = <11000000>;
+		fcnt,pd5v-low-voltage-threshold-uv = <5000000>;
+		fcnt,pd5v-high-voltage-threshold-uv = <5000000>;
+		fcnt,pd9v-low-voltage-threshold-uv = <9000000>;
+		fcnt,pd9v-high-voltage-threshold-uv = <9000000>;
+		fcnt,batt-over-volt-uv = <4500000>;
+		fcnt,batt-unspec-volt-uv = <3400000>;
+		fcnt,batt-low-volt-uv,onchg = <3400000>;
+		fcnt,batt-low-volt-uv,offchg = <3400000>;
+		fcnt,chg-full-soc-lv1 = <99>;
+		fcnt,chg-full-soc-lv2 = <94>;
+		fcnt,chg-rechg-soc-lv1 = <98>;
+		fcnt,chg-rechg-soc-lv2 = <97>;
+		fcnt,chg-full-soc-longevity-lv1 = <87>;
+		fcnt,chg-full-soc-longevity-lv2 = <85>;
+		fcnt,chg-rechg-soc-longevity-lv1 = <85>;
+		fcnt,chg-rechg-soc-longevity-lv2 = <84>;
+		fcnt,chg-volt-uv = <4400000>;
+		fcnt,chg-volt-cycle-uv-lv1 = <4380000>;
+		fcnt,chg-volt-cycle-uv-lv2 = <4340000>;
+		fcnt,chg-safety-timer-min = <600>;
+		fcnt,chg-full1-timer-min = <3>;
+		fcnt,chg-full2-timer-min = <50>;
+		fcnt,batt-temp-hot-limit = <450>;
+		fcnt,batt-temp-warm-limit = <400>;
+		fcnt,batt-temp-cool-limit = <150>;
+		fcnt,batt-temp-cold-limit = <0>;
+		fcnt,batt-temp-start-limit = <400>;
+		fcnt,batt-temp-limit-cancel = <20>;
+		fcnt,chg-nego-usb-detect-count = <3>;
+		fcnt,chg-nego-usb-detect-max = <30>;
+		fcnt,chg-nego-holder-detect-count = <1>;
+		fcnt,chg-nego-holder-detect-max = <30>;
+		fcnt,chg-adapter-voltage-detect-count = <1>;
+		fcnt,chg-adapter-voltage-detect-max = <30>;
+		fcnt,wake-lock-timer-sec = <3>;
+		fcnt,usb5v-ibat-current-max-ma = <1500>;
+		fcnt,usb9v-ibat-current-max-ma = <2000>;
+		fcnt,holder5v-ibat-current-max-ma = <1500>;
+		fcnt,holder9v-ibat-current-max-ma = <1500>;
+		fcnt,ibat-current-low-batt-ma = <500>;
+		fcnt,ibat-current-temp-warm-restrict-ma = <1200>;
+		fcnt,ibat-current-temp-cool-restrict-ma = <800>;
+		fcnt,chg-consecutive-count = <3>;
+		fcnt,chg-term-current-ma = <100>;
+		fcnt,chg-cycle-term-current-ma = <300>;
+		fcnt,chg-icl-step-current-deltas = <300 500 700 900 1100 1200 1400 1500>;
+		fcnt,chg-icl-sts-thresholds-min = <0 6 10 14 18 22 24 28>;
+		fcnt,chg-icl-sts-thresholds-max = <5 9 13 17 21 23 27 30>;
+		fcnt,chg-icl-step-current-start-idx = <2>;
+		fcnt,thermal-mitigation = <3000 900 500 300 (-1)>;
+	};
+};
+
+&qupv3_se15_i2c {
+	#address-cells = <0x1>;
+	#size-cells = <0x0>;
+	status = "ok";
+
+	smb1390: qcom,smb1390@10 {
+		compatible = "qcom,i2c-pmic";
+		reg = <0x10>;
+		#address-cells = <0x1>;
+		#size-cells = <0x0>;
+		interrupt-parent = <&spmi_bus>;
+		interrupts = <0x2 0xc5 0x0 0x8>;
+		interrupt_names = "smb1390";
+		interrupt-controller;
+		#interrupt-cells = <0x3>;
+		qcom,periph-map = <0x10>;
+		status = "disable";
+		pinctrl-names = "default";
+		pinctrl-0 = <&smb_stat_default>;
+
+		smb1390_revid: qcom,revid@100 {
+			compatible = "qcom,qpnp-revid";
+			reg = <0x100>;
+		};
+
+		smb1390_charger: qcom,charge_pump {
+			compatible = "qcom,smb1390-charger-psy";
+			qcom,pmic-revid = <&smb1390_revid>;
+			interrupt-parent = <&smb1390>;
+			status = "disable";
+			io-channels = <&pm8150b_vadc 14>;
+			io-channel-names = "cp_die_temp";
+			qcom,parallel-output-mode = <2>;
+			qcom,min-ilim-ua = <750000>;
+			qcom,parallel-input-mode = <1>;
+
+			qcom,core {
+				interrupts = <0x10 0x0 0x3 0x10 0x1 0x3 0x10 0x2 0x3 0x10 0x3 0x3 0x10 0x4 0x3 0x10 0x5 0x1 0x10 0x6 0x1 0x10 0x7 0x1>;
+				interrupt-names = "switcher-off-window", "switcher-off-fault", "tsd-fault", "irev-fault", "vph-ov-hard", "vph-ov-soft", "ilim", "temp-alarm";
+			};
+		};
+	};
+
+	smb1390_slave: qcom,smb1390_slave@18 {
+		compatible = "qcom,i2c-pmic";
+		reg = <0x18>;
+		#address-cells = <0x1>;
+		#size-cells = <0x0>;
+		qcom,periph-map = <0x10>;
+		status = "disable";
+
+		smb1390_slave_charger: qcom,charge_pump_slave {
+			compatible = "qcom,smb1390-slave";
+			status = "disable";
+		};
+	};
+};

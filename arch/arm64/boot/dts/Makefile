@@ -36,6 +36,8 @@ else
         subdir-y += vendor
 endif
 
+subdir-y += fcnt
+
 dtb-$(CONFIG_OF_ALL_DTBS) := $(patsubst $(dtstree)/%.dts,%.dtb, $(foreach d,$(subdir), $(wildcard $(dtstree)/$(d)/*.dts)))
 
 always		:= $(dtb-y)

@@ -159,6 +159,13 @@ config ARCH_KONA
 	  This enables support for the KONA chipset. If you do not
 	  wish to build a kernel that runs on this chipset, say 'N' here.\
 
+config MACH_FCNT_AMATERASU
+	bool "FCNT arrows 5G (F-51A, amaterasu)"
+	depends on ARCH_KONA
+	help
+	  Build the FCNT arrows 5G (F-51A) device tree blobs and overlays
+	  from arch/arm64/boot/dts/fcnt.
+
 config ARCH_LITO
 	bool "Enable Support for Qualcomm Technologies, Inc. LITO"
 	depends on ARCH_QCOM

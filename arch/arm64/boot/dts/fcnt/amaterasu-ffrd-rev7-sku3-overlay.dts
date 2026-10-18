@@ -1,0 +1,19 @@
+/*
+ * FCNT arrows 5G (F-51A) board overlay - kona FFRD REV7 SKU3
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/clock/qcom,gcc-kona.h>
+#include <dt-bindings/clock/qcom,camcc-kona.h>
+#include <dt-bindings/clock/qcom,rpmh.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+
+#include "amaterasu/amaterasu-overlay.dtsi"
+
+/ {
+	model = "Qualcomm Technologies, Inc. kona FFRD REV7 SKU3";
+	compatible = "qcom,kona-ffrd", "qcom,kona", "qcom,ffrd";
+	qcom,board-id = <0x7030b 0>;
+};

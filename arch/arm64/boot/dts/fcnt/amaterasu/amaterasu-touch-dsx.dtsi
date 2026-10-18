@@ -1,0 +1,64 @@
+/*
+ * FCNT arrows 5G (F-51A) - REV1 touch: Synaptics DSX on QUP SE13
+ * (replaces the Parade controller used from REV4 on).
+ */
+
+&qupv3_se13_i2c {
+	tsc@24 {
+		status = "disabled";
+	};
+
+	synaptics_dsx@20 {
+		compatible = "synaptics,dsx-i2c";
+		reg = <0x20>;
+		status = "ok";
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_dsx_int_default &ts_dsx_rst_default>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <0x27 0x2008>;
+		vdd-supply = <&pm8150a_l1>;
+		avdd-supply = <&pm8150_l13>;
+		synaptics,bus-reg-name = "vdd";
+		synaptics,pwr-reg-name = "avdd";
+		synaptics,irq-gpio = <&tlmm 39 8200>;
+		synaptics,irq-on-state = <0>;
+		synaptics,reset-gpio = <&tlmm 38 0>;
+		synaptics,reset-on-state = <0>;
+		synaptics,reset-active-ms = <20>;
+		synaptics,reset-delay-ms = <200>;
+	};
+};
+
+&tlmm {
+	ts_dsx_int_pin {
+		ts_dsx_int_default: ts_dsx_int_default {
+			mux {
+				pins = "gpio39";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio39";
+				drive-strength = <2>;
+				output-low;
+				bias-disable;
+			};
+		};
+	};
+
+	ts_dsx_rst_pin {
+		ts_dsx_rst_default: ts_dsx_rst_default {
+			mux {
+				pins = "gpio38";
+				function = "gpio";
+			};
+
+			config {
+				pins = "gpio38";
+				drive-strength = <2>;
+				output-low;
+				bias-disable;
+			};
+		};
+	};
+};

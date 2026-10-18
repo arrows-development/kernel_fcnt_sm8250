@@ -1,0 +1,164 @@
+/*
+ * FCNT arrows 5G (F-51A) - Battery: FG Gen4 tuning, battery profiles and FCNT oem_battery_drv.
+ *
+ * Reconstructed from the FCNT stock dtbo (kona FFRD REV7 SKU3); FFRD is
+ * derived from the CLO kona QRD board files.
+ */
+
+&pm8150b_fg {
+	status = "ok";
+	qcom,battery-data = <&kona_qrd_batterydata>;
+	qcom,hold-soc-while-full;
+	qcom,linearize-soc;
+	qcom,five-pin-battery;
+	qcom,cl-wt-enable;
+	qcom,soc-scale-mode-en;
+	qcom,fg-force-load-profile;
+	qcom,force-calib-level = <128>;
+	qcom,fg-esr-timer-chg-fast = <0 7>;
+	qcom,fg-esr-timer-dischg-fast = <0 7>;
+	qcom,fg-esr-timer-chg-slow = <0 96>;
+	qcom,fg-esr-timer-dischg-slow = <0 96>;
+	qcom,fg-esr-cal-soc-thresh = <26 230>;
+	qcom,fg-esr-cal-temp-thresh = <10 40>;
+	qcom,soc-hi-res;
+	qcom,fg-cc-cv-threshold-mv = <4380>;
+	qcom,fg-cycle-lv1-cc-cv-threshold-mv = <4360>;
+	qcom,fg-cycle-lv2-cc-cv-threshold-mv = <4320>;
+	qcom,fg-sys-term-current = <(-200)>;
+	qcom,fg-cycle-lv1-sys-term-current = <(-400)>;
+	qcom,fg-cycle-lv2-sys-term-current = <(-325)>;
+	qcom,fg-cutoff-voltage = <3470>;
+	qcom,fg-empty-voltage = <2812>;
+	qcom,fg-delta-soc-thr = <4>;
+};
+
+&soc {
+	oem_battery_drv {
+		compatible = "fcnt,oem_battery_drv";
+		status = "ok";
+		fcnt,batt-recharge-soc = <98>;
+		fcnt,batt-full-keep-soc = <99>;
+		fcnt,batt-low-voltage-mv = <3600>;
+		fcnt,batt-shutdown-voltage-mv = <3200>;
+		fcnt,batt-shutdown-count = <3>;
+		fcnt,batt-longevity-full-soc-min = <85>;
+		fcnt,batt-longevity-full-soc-max = <87>;
+		fcnt,batt-longevity-recharge-soc = <85>;
+		fcnt,batt-cycle-count-hi-soc = <90>;
+		fcnt,batt-cycle-count-hi-temp = <400>;
+		fcnt,batt-cycle-charge-count-lv1 = <10>;
+		fcnt,batt-cycle-charge-count-lv2 = <100>;
+		fcnt,batt-temp-correction-values = <0 0 0 0 0>;
+		fcnt,batt-temp-correction-thresholds = <0 0 0 0 0>;
+	};
+};
+
+&vendor {
+	kona_qrd_batterydata: qcom,battery-data {
+		qcom,batt-id-range-pct = <15>;
+
+#ifndef AMATERASU_PROTO
+		qcom,murata_3800mah_rev1_averaged_masterslave_mar9th2020 {
+			qcom,profile-revision = <24>;
+			qcom,fastchg-current-ma = <2000>;
+			qcom,max-voltage-uv = <4400000>;
+			qcom,fg-cc-cv-threshold-mv = <4380>;
+			qcom,nom-batt-capacity-mah = <3800>;
+			qcom,batt-id-kohm = <10>;
+			qcom,battery-beta = <4250>;
+			qcom,therm-room-temp = <100000>;
+			qcom,battery-type = "murata_3800mah_rev1_masterslave_mar9th2020";
+			qcom,therm-coefficients = <0x2318 0xd0c 0xdaf7 0xc556 0x848d>;
+			qcom,therm-center-offset = <0x70>;
+			qcom,therm-pull-up = <100>;
+			qcom,rslow-normal-coeffs = <0xe 0x4 0xba 0x12>;
+			qcom,rslow-low-coeffs = <0xb6 0x4 0x38 0x13>;
+			qcom,soc-based-step-chg;
+			qcom,step-chg-ranges = <0 50 2000000 51 100 1500000>;
+			qcom,jeita-fcc-ranges = <0 150 800000 151 400 5000000 401 450 1200000>;
+			qcom,jeita-fv-ranges = <0 150 4400000 151 400 4400000 401 450 4400000>;
+			qcom,jeita-hard-thresholds = <22733 8376>;
+			qcom,jeita-soft-thresholds = <17953 9699>;
+			qcom,checksum = <0x4574>;
+			qcom,gui-version = "PM855GUI - 1.0.0.14";
+			qcom,fg-profile-data = <0x900d8e3 0xbcccfd2 0x70cd0000 0x92bd4a8a 0xfc875684 0xb9861580 0x1d000e04 0xba12fffc 0x8200ce07 0x320003f2 0x5ded2dda 0x580bfde5 0xf7cddb13 0x290235d3 0x60003e00 0x3d003e00 0x3f002d00 0x33003600 0x47004100 0x3d006000 0x35003a00 0x3f003e00 0x33006f00 0x4c644200 0x3c003b08 0x60f84100 0x44005510 0x4f104400 0x81285c48 0x4e60460b 0x4500d808 0xd8204214 0x12032dfc 0x2f1cb603 0x8f055a22 0x1b185842 0xbf542403 0x78107722 0x5705280a 0xc7fcfa1c 0xfdfa5205 0x5039f18 0x4323ec44 0xfa539a13 0x302004e5 0xc7c21bcc 0xe61ccbd2 0xc105acba 0x7b18e18a 0xa585a592 0x90980980 0xbe03fefd 0x39045bfa 0x8fd5 0xdceaf707 0xbeebd3b4 0x34201700 0x5de49f03 0x11069902 0xce073200 0xb901df02 0x3052706 0xff031605 0x7e022802 0x1b044700 0x3b004200 0x41644400 0x46003c08 0x42f84200 0x42003c08 0x3e083e00 0x4e284f48 0x52585b0d 0x52004600 0x4b085900 0x45003f00 0x43085308 0x51005b20 0x6e405c58 0x4f0e5d00 0x55003208 0xd800ea20 0xda049c0a 0x7f0cd91c 0xc235144 0x63537918 0xa02af05 0xa5037e10 0x3f0a5520 0xe904e802 0xe305c81c 0xe5023104 0xf9039818 0xa6032504 0xd2027200 0xaa1f8b05 0x8c022806 0xc61c7602 0xfa044903 0xa9182503 0x1405c203 0x71003a01 0xc000fa00 0x320f0000>;
+		};
+
+		qcom,scud_4100mah_rev1_averaged_masterslave_jan7th2020 {
+			qcom,profile-revision = <24>;
+			qcom,fastchg-current-ma = <2000>;
+			qcom,max-voltage-uv = <4400000>;
+			qcom,fg-cc-cv-threshold-mv = <4380>;
+			qcom,nom-batt-capacity-mah = <4100>;
+			qcom,batt-id-kohm = <100>;
+			qcom,battery-beta = <4250>;
+			qcom,therm-room-temp = <100000>;
+			qcom,battery-type = "scud_4100mah_rev1_masterslave_jan7th2020";
+			qcom,therm-coefficients = <0x2318 0xd0c 0xdaf7 0xc556 0x848d>;
+			qcom,therm-center-offset = <0x70>;
+			qcom,therm-pull-up = <100>;
+			qcom,rslow-normal-coeffs = <0xfb 0xf3 0xff 0x1b>;
+			qcom,rslow-low-coeffs = <0x8 0x1d 0x25 0x1>;
+			qcom,soc-based-step-chg;
+			qcom,step-chg-ranges = <0 50 2000000 51 100 1500000>;
+			qcom,jeita-fcc-ranges = <0 150 800000 151 400 5000000 401 450 1200000>;
+			qcom,jeita-fv-ranges = <0 150 4400000 151 400 4400000 401 450 4400000>;
+			qcom,jeita-hard-thresholds = <22733 8376>;
+			qcom,jeita-soft-thresholds = <17953 9699>;
+			qcom,checksum = <0xcd3c>;
+			qcom,gui-version = "PM855GUI - 1.0.0.13";
+			qcom,fg-profile-data = <0x9007fea 0x69d4d8da 0x1dd50000 0x12bdb18a 0xfb87369d 0x359a1080 0x1400fbf3 0xff1be905 0x93face07 0x3200a5ea 0x1e453d3 0xdb0379ea 0x47bb4c03 0xeaf434d5 0x60004800 0x46004300 0x39003300 0x34003900 0x42004900 0x50006000 0x3d004200 0x4b004000 0x3b008800 0x61644a00 0x44004708 0x60f04500 0x49006010 0x4f104a00 0x8c286250 0x52684b0a 0x4c00d800 0x8e1fc20d 0xf020bfc 0x6c1c760b 0x930d8d2a 0xef163f4b 0x9a5d6e02 0x690f0a1f 0x3906050a 0xc106e91c 0xfdfb9205 0xe0020618 0x522e845 0xf95a6c10 0x5e1fdfed 0x47ca7ec6 0xe31c13cb 0x55053bbb 0xcd17cc8b 0x68845282 0x82980980 0x6402b10d 0xb1fde1fa 0xdd 0x5203f6ff 0xfbe054cd 0x60181200 0xa5e54a02 0x81043d02 0xce073200 0x8b013703 0xa9072b03 0xf6043702 0x7c02fc02 0x36054f00 0x3d004000 0x40644300 0x43f84500 0x45004500 0x46003f08 0x49083f00 0x46204440 0x4d585e0f 0x3d004700 0x4e0857f8 0x46004200 0x41084910 0x47005820 0x70484658 0x510d5200 0x4c002d08 0xd8f8451f 0x75058a0a 0x9e0f111d 0x8222f444 0x1a5bbb18 0xa0034704 0xa3027010 0x3f0aff1f 0x4b05b302 0x2b04d31c 0xe1022404 0x17028b18 0xfd03bb05 0x92036d00 0xc51f7b05 0x9f023b04 0xe11c3b02 0x6e05d902 0xa6185003 0xd0041e02 0x75009e01 0xc000fa00 0x68100000>;
+		};
+#else
+		/* prototype (REV1..REV3) battery packs */
+		qcom,murata_3800mah_rev0_averaged_masterslave_mar9th2020 {
+			qcom,profile-revision = <24>;
+			qcom,fastchg-current-ma = <1500>;
+			qcom,max-voltage-uv = <4400000>;
+			qcom,fg-cc-cv-threshold-mv = <4380>;
+			qcom,nom-batt-capacity-mah = <3800>;
+			qcom,batt-id-kohm = <10>;
+			qcom,battery-beta = <4250>;
+			qcom,therm-room-temp = <100000>;
+			qcom,battery-type = "murata_3800mah_rev0_masterslave_mar9th2020";
+			qcom,therm-coefficients = <0x2318 0xd0c 0xdaf7 0xc556 0x848d>;
+			qcom,therm-center-offset = <0x70>;
+			qcom,therm-pull-up = <100>;
+			qcom,rslow-normal-coeffs = <0xe 0x4 0xba 0x12>;
+			qcom,rslow-low-coeffs = <0xb6 0x4 0x38 0x13>;
+			qcom,jeita-fcc-ranges = <0 150 800000 151 400 5000000 401 450 1200000>;
+			qcom,jeita-fv-ranges = <0 150 4400000 151 400 4400000 401 450 4400000>;
+			qcom,jeita-hard-thresholds = <22733 8376>;
+			qcom,jeita-soft-thresholds = <17953 9699>;
+			qcom,checksum = <0x4574>;
+			qcom,gui-version = "PM855GUI - 1.0.0.14";
+			qcom,fg-profile-data = <0x900d8e3 0xbcccfd2 0x70cd0000 0x92bd4a8a 0xfc875684 0xb9861580 0x1d000e04 0xba12fffc 0x8200ce07 0x320003f2 0x5ded2dda 0x580bfde5 0xf7cddb13 0x290235d3 0x60003e00 0x3d003e00 0x3f002d00 0x33003600 0x47004100 0x3d006000 0x35003a00 0x3f003e00 0x33006f00 0x4c644200 0x3c003b08 0x60f84100 0x44005510 0x4f104400 0x81285c48 0x4e60460b 0x4500d808 0xd8204214 0x12032dfc 0x2f1cb603 0x8f055a22 0x1b185842 0xbf542403 0x78107722 0x5705280a 0xc7fcfa1c 0xfdfa5205 0x5039f18 0x4323ec44 0xfa539a13 0x302004e5 0xc7c21bcc 0xe61ccbd2 0xc105acba 0x7b18e18a 0xa585a592 0x90980980 0xbe03fefd 0x39045bfa 0x8fd5 0xdceaf707 0xbeebd3b4 0x34201700 0x5de49f03 0x11069902 0xce073200 0xb901df02 0x3052706 0xff031605 0x7e022802 0x1b044700 0x3b004200 0x41644400 0x46003c08 0x42f84200 0x42003c08 0x3e083e00 0x4e284f48 0x52585b0d 0x52004600 0x4b085900 0x45003f00 0x43085308 0x51005b20 0x6e405c58 0x4f0e5d00 0x55003208 0xd800ea20 0xda049c0a 0x7f0cd91c 0xc235144 0x63537918 0xa02af05 0xa5037e10 0x3f0a5520 0xe904e802 0xe305c81c 0xe5023104 0xf9039818 0xa6032504 0xd2027200 0xaa1f8b05 0x8c022806 0xc61c7602 0xfa044903 0xa9182503 0x1405c203 0x71003a01 0xc000fa00 0x320f0000>;
+		};
+
+		qcom,scud_4100mah_rev0_averaged_masterslave_jan7th2020 {
+			qcom,profile-revision = <24>;
+			qcom,fastchg-current-ma = <1500>;
+			qcom,max-voltage-uv = <4400000>;
+			qcom,fg-cc-cv-threshold-mv = <4380>;
+			qcom,nom-batt-capacity-mah = <4100>;
+			qcom,batt-id-kohm = <100>;
+			qcom,battery-beta = <4250>;
+			qcom,therm-room-temp = <100000>;
+			qcom,battery-type = "scud_4100mah_rev0_masterslave_jan7th2020";
+			qcom,therm-coefficients = <0x2318 0xd0c 0xdaf7 0xc556 0x848d>;
+			qcom,therm-center-offset = <0x70>;
+			qcom,therm-pull-up = <100>;
+			qcom,rslow-normal-coeffs = <0xfb 0xf3 0xff 0x1b>;
+			qcom,rslow-low-coeffs = <0x8 0x1d 0x25 0x1>;
+			qcom,jeita-fcc-ranges = <0 150 800000 151 400 5000000 401 450 1200000>;
+			qcom,jeita-fv-ranges = <0 150 4400000 151 400 4400000 401 450 4400000>;
+			qcom,jeita-hard-thresholds = <22733 8376>;
+			qcom,jeita-soft-thresholds = <17953 9699>;
+			qcom,checksum = <0xcd3c>;
+			qcom,gui-version = "PM855GUI - 1.0.0.13";
+			qcom,fg-profile-data = <0x9007fea 0x69d4d8da 0x1dd50000 0x12bdb18a 0xfb87369d 0x359a1080 0x1400fbf3 0xff1be905 0x93face07 0x3200a5ea 0x1e453d3 0xdb0379ea 0x47bb4c03 0xeaf434d5 0x60004800 0x46004300 0x39003300 0x34003900 0x42004900 0x50006000 0x3d004200 0x4b004000 0x3b008800 0x61644a00 0x44004708 0x60f04500 0x49006010 0x4f104a00 0x8c286250 0x52684b0a 0x4c00d800 0x8e1fc20d 0xf020bfc 0x6c1c760b 0x930d8d2a 0xef163f4b 0x9a5d6e02 0x690f0a1f 0x3906050a 0xc106e91c 0xfdfb9205 0xe0020618 0x522e845 0xf95a6c10 0x5e1fdfed 0x47ca7ec6 0xe31c13cb 0x55053bbb 0xcd17cc8b 0x68845282 0x82980980 0x6402b10d 0xb1fde1fa 0xdd 0x5203f6ff 0xfbe054cd 0x60181200 0xa5e54a02 0x81043d02 0xce073200 0x8b013703 0xa9072b03 0xf6043702 0x7c02fc02 0x36054f00 0x3d004000 0x40644300 0x43f84500 0x45004500 0x46003f08 0x49083f00 0x46204440 0x4d585e0f 0x3d004700 0x4e0857f8 0x46004200 0x41084910 0x47005820 0x70484658 0x510d5200 0x4c002d08 0xd8f8451f 0x75058a0a 0x9e0f111d 0x8222f444 0x1a5bbb18 0xa0034704 0xa3027010 0x3f0aff1f 0x4b05b302 0x2b04d31c 0xe1022404 0x17028b18 0xfd03bb05 0x92036d00 0xc51f7b05 0x9f023b04 0xe11c3b02 0x6e05d902 0xa6185003 0xd0041e02 0x75009e01 0xc000fa00 0x68100000>;
+		};
+#endif
+	};
+};

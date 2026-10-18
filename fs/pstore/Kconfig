@@ -125,6 +125,14 @@ config PSTORE_PMSG
 
 	  If unsure, say N.
 
+config PSTORE_SUMMARY
+	bool "log the boot reason"
+	depends on PSTORE_PMSG
+	help
+	  On reboot the reason can be retrieved from /sys/fs/pstore/smry-ramoops-[ID].
+
+	  If unsure, say N.
+
 config PSTORE_FTRACE
 	bool "Persistent function tracer"
 	depends on PSTORE

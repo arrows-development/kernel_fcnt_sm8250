@@ -32,6 +32,7 @@
 #include <linux/sysfs.h>
 #include <asm/sections.h>
 #include <soc/qcom/minidump.h>
+#include <linux/pstore.h>
 
 #define PANIC_TIMER_STEP 100
 #define PANIC_BLINK_SPD 18
@@ -196,6 +197,7 @@ void panic(const char *fmt, ...)
 	va_list args;
 	long i, i_next = 0;
 	int state = 0;
+    SMR_TID smry_id;
 	int old_cpu, this_cpu;
 	bool _crash_kexec_post_notifiers = crash_kexec_post_notifiers;
 
@@ -248,6 +250,10 @@ void panic(const char *fmt, ...)
 	if (vendor_panic_cb)
 		vendor_panic_cb(0);
 	pr_emerg("Kernel panic - not syncing: %s\n", buf);
+	smry_id = SMR_KEN_PANIC;
+	if (! strncmp(buf, "subsys-restart", 14))
+		smry_id = SMR_SSR;
+	pstore_write_summary(smry_id);
 #ifdef CONFIG_DEBUG_BUGVERBOSE
 	/*
 	 * Avoid nested stack-dumping if a panic occurs during oops processing

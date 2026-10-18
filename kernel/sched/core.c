@@ -6368,7 +6368,9 @@ state_filter_match(unsigned long state_filter, struct task_struct *p)
 
 void show_state_filter(unsigned long state_filter)
 {
-	struct task_struct *g, *p;
+/* FCNT:2016-06-16 LogImprovement MOD-S */
+	// struct task_struct *g, *p;
+/* FCNT:2016-06-16 LogImprovement MOD-E */
 
 #if BITS_PER_LONG == 32
 	printk(KERN_INFO
@@ -6378,6 +6380,8 @@ void show_state_filter(unsigned long state_filter)
 		"  task                        PC stack   pid father\n");
 #endif
 	rcu_read_lock();
+/* FCNT:2016-06-16 LogImprovement MOD-S */
+#if 0
 	for_each_process_thread(g, p) {
 		/*
 		 * reset the NMI-timeout, listing all files on a slow
@@ -6392,6 +6396,7 @@ void show_state_filter(unsigned long state_filter)
 			sched_show_task(p);
 	}
 
+#endif
 #ifdef CONFIG_SCHED_DEBUG
 	if (!state_filter)
 		sysrq_sched_debug_show();

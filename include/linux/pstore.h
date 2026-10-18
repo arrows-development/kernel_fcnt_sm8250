@@ -44,8 +44,34 @@ enum pstore_type_id {
 	PSTORE_TYPE_PPC_COMMON	= 6,
 	PSTORE_TYPE_PMSG	= 7,
 	PSTORE_TYPE_PPC_OPAL	= 8,
+#ifdef CONFIG_PSTORE_SUMMARY
+	PSTORE_TYPE_SUMMARY	= 9,
+#endif
 	PSTORE_TYPE_UNKNOWN	= 255
 };
+/* FCNT:2016-06-20 GEN-162-SUMMARY-LOG ADD-S */
+typedef enum {
+    SMR_UNKNOWN             = -1,
+    SMR_TEMP_SHUTDOWN       = 1,
+    SMR_LOW_BATTERY         = 2,
+    SMR_POWER_FLICKER       = 3,
+    SMR_SIM_ADDED           = 5,
+    SMR_SSR                 = 7,
+    SMR_KEN_PANIC           = 8,
+    SMR_SW_WDT              = 9,
+    SMR_SIGSEGV             = 10,
+    SMR_SIGABRT             = 11,
+    SMR_WDT_BARK_NOW        = 12,
+    SMR_FATAL_EXCEPTION     = 13,
+    SMR_LONG_PRESS          = 14,
+    SMR_HW_WDT              = 15,
+    SMR_NORMAL_OFF          = 16,
+    SMR_NORMAL_REBOOT       = 17,
+    SMR_CUSTOM_LOG          = 18,
+    SMR_SSR_MODEM           = 19,
+    SUMMARY_ID_MAX
+} SMR_TID;
+/* FCNT:2016-06-20 GEN-162-SUMMARY-LOG ADD-E */
 
 struct pstore_info;
 /**
@@ -189,6 +215,10 @@ struct pstore_info {
 	int		(*write_user)(struct pstore_record *record,
 				      const char __user *buf);
 	int		(*erase)(struct pstore_record *record);
+	int		(*write_buf)(enum pstore_type_id type,
+			enum kmsg_dump_reason reason, u64 *id,
+			unsigned int part, const char *buf, bool compressed,
+			size_t size, struct pstore_info *psi);
 };
 
 /* Supported frontends */
@@ -274,6 +304,11 @@ pstore_ftrace_write_timestamp(struct pstore_ftrace_record *rec, u64 val)
 {
 	rec->ts = (rec->ts & TS_CPU_MASK) | (val << TS_CPU_SHIFT);
 }
+#endif
+
+#ifdef CONFIG_PSTORE_SUMMARY
+extern ssize_t pstore_write_summary(const int resetid);
+extern ssize_t pstore_write_summary_msg(const int resetid, const char* msg);
 #endif
 
 #endif /*_LINUX_PSTORE_H*/

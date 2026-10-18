@@ -717,6 +717,12 @@ void __init paging_init(void)
 	memcpy(swapper_pg_dir, pgdp, PGD_SIZE);
 	cpu_replace_ttbr1(lm_alias(swapper_pg_dir));
 
+/* FCNT:2016-05-20 LogImprovement ADD-S */
+    if(memblock_reserve(0xB9500000,0x300000) != 0) {
+        printk(KERN_INFO "fta memblock_reserve failed\n");
+    }
+/* FCNT:2016-05-20 LogImprovement ADD-E */
+
 	pgd_clear_fixmap();
 	memblock_free(pgd_phys, PAGE_SIZE);
 

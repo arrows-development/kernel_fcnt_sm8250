@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/kernel/reboot.c
  *
@@ -342,7 +345,7 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	mutex_lock(&system_transition_mutex);
 	switch (cmd) {
 	case LINUX_REBOOT_CMD_RESTART:
-		kernel_restart(NULL);
+		kernel_restart("user space request");
 		break;
 
 	case LINUX_REBOOT_CMD_CAD_ON:

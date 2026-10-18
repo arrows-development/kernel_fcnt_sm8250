@@ -56,6 +56,13 @@ static ulong ramoops_pmsg_size = MIN_MEM_SIZE;
 module_param_named(pmsg_size, ramoops_pmsg_size, ulong, 0400);
 MODULE_PARM_DESC(pmsg_size, "size of user space message log");
 
+#ifdef CONFIG_PSTORE_SUMMARY
+static ulong ramoops_smry_size = MIN_MEM_SIZE;
+module_param_named(smry_size, ramoops_smry_size, ulong, 0400);
+MODULE_PARM_DESC(smry_size, "size of log of the reboot reason");
+#endif
+
+
 static unsigned long long mem_address;
 module_param_hw(mem_address, ullong, other, 0400);
 MODULE_PARM_DESC(mem_address,
@@ -88,6 +95,9 @@ struct ramoops_context {
 	struct persistent_ram_zone *cprz;	/* Console zone */
 	struct persistent_ram_zone **fprzs;	/* Ftrace zones */
 	struct persistent_ram_zone *mprz;	/* PMSG zone */
+#ifdef CONFIG_PSTORE_SUMMARY
+	struct persistent_ram_zone *sprz;
+#endif
 	phys_addr_t phys_addr;
 	unsigned long size;
 	unsigned int memtype;
@@ -95,6 +105,9 @@ struct ramoops_context {
 	size_t console_size;
 	size_t ftrace_size;
 	size_t pmsg_size;
+#ifdef CONFIG_PSTORE_SUMMARY
+	size_t smry_size;
+#endif
 	int dump_oops;
 	u32 flags;
 	struct persistent_ram_ecc_info ecc_info;
@@ -106,6 +119,9 @@ struct ramoops_context {
 	unsigned int max_ftrace_cnt;
 	unsigned int ftrace_read_cnt;
 	unsigned int pmsg_read_cnt;
+#ifdef CONFIG_PSTORE_SUMMARY
+	unsigned int smry_read_cnt;
+#endif
 	struct pstore_info pstore;
 };
 
@@ -120,6 +136,9 @@ static int ramoops_pstore_open(struct pstore_info *psi)
 	cxt->console_read_cnt = 0;
 	cxt->ftrace_read_cnt = 0;
 	cxt->pmsg_read_cnt = 0;
+#ifdef CONFIG_PSTORE_SUMMARY
+	cxt->smry_read_cnt = 0;
+#endif
 	return 0;
 }
 
@@ -283,6 +302,11 @@ static ssize_t ramoops_pstore_read(struct pstore_record *record)
 		prz = ramoops_get_next_prz(&cxt->mprz, &cxt->pmsg_read_cnt,
 					   1, &record->id, &record->type,
 					   PSTORE_TYPE_PMSG, 0);
+#ifdef CONFIG_PSTORE_SUMMARY
+	if (!prz_ok(prz))
+		prz = ramoops_get_next_prz(&cxt->sprz, &cxt->smry_read_cnt,
+					   1, &record->id, &record->type, PSTORE_TYPE_SUMMARY, 0);
+#endif
 
 	/* ftrace is last since it may want to dynamically allocate memory. */
 	if (!prz_ok(prz)) {
@@ -406,6 +430,13 @@ static int notrace ramoops_pstore_write(struct pstore_record *record)
 	} else if (record->type == PSTORE_TYPE_PMSG) {
 		pr_warn_ratelimited("PMSG shouldn't call %s\n", __func__);
 		return -EINVAL;
+#ifdef CONFIG_PSTORE_SUMMARY
+	} else if (record->type == PSTORE_TYPE_SUMMARY) {
+		if (!cxt->sprz)
+			return -ENOMEM;
+		persistent_ram_write(cxt->sprz, record->buf, record->size);
+		return 0;
+#endif
 	}
 
 	if (record->type != PSTORE_TYPE_DMESG)
@@ -496,6 +527,11 @@ static int ramoops_pstore_erase(struct pstore_record *record)
 	case PSTORE_TYPE_PMSG:
 		prz = cxt->mprz;
 		break;
+#ifdef CONFIG_PSTORE_SUMMARY
+	case PSTORE_TYPE_SUMMARY:
+		prz = cxt->sprz;
+		break;
+#endif
 	default:
 		return -EINVAL;
 	}
@@ -732,6 +768,9 @@ static int ramoops_probe(struct platform_device *pdev)
 	size_t dump_mem_sz;
 	phys_addr_t paddr;
 	int err = -EINVAL;
+#if defined(CONFIG_PSTORE_SUMMARY)
+        ulong mem_mask = ~(MIN_MEM_SIZE - 1);
+#endif
 
 	if (dev_of_node(dev) && !pdata) {
 		pdata = &pdata_local;
@@ -765,7 +804,15 @@ static int ramoops_probe(struct platform_device *pdev)
 		err = -EINVAL;
 		goto fail_out;
 	}
+#ifdef CONFIG_PSTORE_SUMMARY
+	if (!pdata->smry_size) {
+		pr_err("The summary size must be non-zero\n");
+		goto fail_out;
+	}
+#endif
 
+
+#if ! defined(CONFIG_PSTORE_SUMMARY)
 	if (pdata->record_size && !is_power_of_2(pdata->record_size))
 		pdata->record_size = rounddown_pow_of_two(pdata->record_size);
 	if (pdata->console_size && !is_power_of_2(pdata->console_size))
@@ -775,6 +822,17 @@ static int ramoops_probe(struct platform_device *pdev)
 	if (pdata->pmsg_size && !is_power_of_2(pdata->pmsg_size))
 		pdata->pmsg_size = rounddown_pow_of_two(pdata->pmsg_size);
 
+#else
+        pdata->mem_size		&= mem_mask;
+        pdata->record_size	&= mem_mask;
+        pdata->console_size 	&= mem_mask;
+        pdata->ftrace_size	&= mem_mask;
+        pdata->pmsg_size	&= mem_mask;
+
+#ifdef CONFIG_PSTORE_SUMMARY
+        pdata->smry_size	&= mem_mask;
+#endif
+#endif
 	cxt->size = pdata->mem_size;
 	cxt->phys_addr = pdata->mem_address;
 	cxt->memtype = pdata->mem_type;
@@ -782,6 +840,9 @@ static int ramoops_probe(struct platform_device *pdev)
 	cxt->console_size = pdata->console_size;
 	cxt->ftrace_size = pdata->ftrace_size;
 	cxt->pmsg_size = pdata->pmsg_size;
+#ifdef CONFIG_PSTORE_SUMMARY
+	cxt->smry_size = pdata->smry_size;
+#endif
 	cxt->dump_oops = pdata->dump_oops;
 	cxt->flags = pdata->flags;
 	cxt->ecc_info = pdata->ecc_info;
@@ -790,6 +851,14 @@ static int ramoops_probe(struct platform_device *pdev)
 
 	dump_mem_sz = cxt->size - cxt->console_size - cxt->ftrace_size
 			- cxt->pmsg_size;
+#ifdef CONFIG_PSTORE_SUMMARY
+	dump_mem_sz -= cxt->smry_size;
+#endif
+#if defined(CONFIG_PSTORE_SUMMARY)
+        printk(KERN_INFO "size: %lu, phys: %lu, record_size: %lu, console_size: %lu, ftrace_size: %lu, pmsg_size: %lu, smry_size: %lu, dump_oops: %d, dump_mem_sz: %lu\n", 
+               cxt->size, (unsigned long)cxt->phys_addr, cxt->record_size, cxt->console_size, cxt->ftrace_size, cxt->pmsg_size, cxt->smry_size, cxt->dump_oops, dump_mem_sz);
+#endif
+
 	err = ramoops_init_przs("dump", dev, cxt, &cxt->dprzs, &paddr,
 				dump_mem_sz, cxt->record_size,
 				&cxt->max_dump_cnt, 0, 0);
@@ -816,6 +885,13 @@ static int ramoops_probe(struct platform_device *pdev)
 				cxt->pmsg_size, 0);
 	if (err)
 		goto fail_init_mprz;
+
+
+#ifdef CONFIG_PSTORE_SUMMARY
+	err = ramoops_init_prz("smry",dev, cxt, &cxt->sprz, &paddr, cxt->smry_size, 0);
+	if (err)
+		goto fail_init_sprz;
+#endif
 
 	cxt->pstore.data = cxt;
 	/*
@@ -877,6 +953,10 @@ fail_buf:
 	kfree(cxt->pstore.buf);
 fail_clear:
 	cxt->pstore.bufsize = 0;
+#ifdef CONFIG_PSTORE_SUMMARY
+	persistent_ram_free(cxt->sprz);
+fail_init_sprz:
+#endif
 	persistent_ram_free(cxt->mprz);
 fail_init_mprz:
 fail_init_fprz:
@@ -951,7 +1031,14 @@ static void __init ramoops_register_dummy(void)
 	dummy_data->console_size = ramoops_console_size;
 	dummy_data->ftrace_size = ramoops_ftrace_size;
 	dummy_data->pmsg_size = ramoops_pmsg_size;
+#ifdef CONFIG_PSTORE_SUMMARY
+	dummy_data->smry_size = ramoops_smry_size;
+#endif
 	dummy_data->dump_oops = dump_oops;
+#if defined(CONFIG_PSTORE_SUMMARY)
+        printk(KERN_INFO "size: %lu, phys: %lu, record_size: %lu, console_size: %lu, ftrace_size: %lu, pmsg_size: %lu, smry_size: %lu, dump_oops: %d\n", 
+               dummy_data->mem_size, (unsigned long)dummy_data->mem_address, dummy_data->record_size, dummy_data->console_size, dummy_data->ftrace_size, dummy_data->pmsg_size, dummy_data->smry_size, dummy_data->dump_oops);
+#endif
 	dummy_data->flags = RAMOOPS_FLAG_FTRACE_PER_CPU;
 
 	/*

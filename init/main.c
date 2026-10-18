@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/init/main.c
  *
@@ -93,6 +96,8 @@
 #include <linux/rodata_test.h>
 #include <linux/jump_label.h>
 #include <linux/mem_encrypt.h>
+
+#include <linux/switch_logout.h>
 
 #include <asm/io.h>
 #include <asm/setup.h>
@@ -560,6 +565,8 @@ asmlinkage __visible void __init start_kernel(void)
 	char *command_line;
 	char *after_dashes;
 
+	poweron_bench_printk("@BT %s S\n", __func__);
+
 	set_task_stack_end_magic(&init_task);
 	smp_setup_processor_id();
 	debug_objects_early_init();
@@ -966,6 +973,7 @@ static void __init do_initcall_level(int level)
 {
 	initcall_entry_t *fn;
 
+	poweron_bench_printk("@BT %s S\n", __func__);
 	strcpy(initcall_command_line, saved_command_line);
 	parse_args(initcall_level_names[level],
 		   initcall_command_line, __start___param,
@@ -975,7 +983,16 @@ static void __init do_initcall_level(int level)
 
 	trace_initcall_level(initcall_level_names[level]);
 	for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++)
+#ifdef POWER_ON_BENCH_LOG
+	{
+		poweron_bench_printk("@BT %pf S\n", fn);
 		do_one_initcall(initcall_from_entry(fn));
+	}
+	poweron_bench_printk("@BT %s E\n", __func__);
+#else
+		do_one_initcall(initcall_from_entry(fn));
+#endif
+
 }
 
 static void __init do_initcalls(void)
@@ -1086,6 +1103,7 @@ static inline void mark_readonly(void)
 static int __ref kernel_init(void *unused)
 {
 	int ret;
+	poweron_bench_printk("@BT %s S\n", __func__);
 
 	kernel_init_freeable();
 	/* need to finish all async __init code before freeing the memory */
@@ -1199,6 +1217,7 @@ static noinline void __init kernel_init_freeable(void)
 	 * rootfs is available now, try loading the public keys
 	 * and default modules
 	 */
+	switch_powercollapse_dump();
 
 	integrity_load_keys();
 	load_default_modules();

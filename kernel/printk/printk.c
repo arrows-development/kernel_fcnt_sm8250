@@ -1748,7 +1748,8 @@ static int console_trylock_spinning(void)
  * log_buf[start] to log_buf[end - 1].
  * The console_lock must be held.
  */
-static void call_console_drivers(const char *ext_text, size_t ext_len,
+static void call_console_drivers(int level,
+				 const char *ext_text, size_t ext_len,
 				 const char *text, size_t len)
 {
 	struct console *con;
@@ -1763,15 +1764,25 @@ static void call_console_drivers(const char *ext_text, size_t ext_len,
 			continue;
 		if (!(con->flags & CON_ENABLED))
 			continue;
-		if (!con->write)
+		// if (!con->write)
+		if (!con->write && !con->writex)
 			continue;
 		if (!cpu_online(smp_processor_id()) &&
 		    !(con->flags & CON_ANYTIME))
 			continue;
-		if (con->flags & CON_EXTENDED)
-			con->write(con, ext_text, ext_len);
-		else
-			con->write(con, text, len);
+		if (con->flags & CON_EXTENDED) {
+            if (con->writex) {
+                con->writex(con, level, ext_text, ext_len);
+            } else {
+			    con->write(con, ext_text, ext_len);
+            }
+		} else {
+            if (con->writex) {
+                con->writex(con, level, text, len);
+            } else {
+			    con->write(con, text, len);
+            }
+        }
 	}
 }
 
@@ -2079,7 +2090,8 @@ static ssize_t msg_print_ext_body(char *buf, size_t size,
 				  char *text, size_t text_len) { return 0; }
 static void console_lock_spinning_enable(void) { }
 static int console_lock_spinning_disable_and_check(void) { return 0; }
-static void call_console_drivers(const char *ext_text, size_t ext_len,
+static void call_console_drivers(int level,
+				 const char *ext_text, size_t ext_len,
 				 const char *text, size_t len) {}
 static size_t msg_print_text(const struct printk_log *msg,
 			     bool syslog, char *buf, size_t size) { return 0; }
@@ -2417,6 +2429,7 @@ again:
 		size_t ext_len = 0;
 		size_t len;
 
+		int level;
 		printk_safe_enter_irqsave(flags);
 		raw_spin_lock(&logbuf_lock);
 		if (console_seq < log_first_seq) {
@@ -2435,6 +2448,7 @@ skip:
 			break;
 
 		msg = log_from_idx(console_idx);
+		level = msg->level;
 		if (suppress_message_printing(msg->level)) {
 			/*
 			 * Skip record we have buffered and already printed
@@ -2478,7 +2492,7 @@ skip:
 		console_lock_spinning_enable();
 
 		stop_critical_timings();	/* don't trace print latency */
-		call_console_drivers(ext_text, ext_len, text, len);
+		call_console_drivers(level, ext_text, ext_len, text, len);
 		start_critical_timings();
 
 		if (console_lock_spinning_disable_and_check()) {

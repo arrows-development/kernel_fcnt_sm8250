@@ -3378,6 +3378,21 @@ SYSCALL_DEFINE2(kill, pid_t, pid, int, sig)
 {
 	struct siginfo info;
 
+	
+	if (sig == SIGKILL || sig == SIGTERM) {
+		struct task_struct *task_grp;
+		struct task_struct *task_thr;
+
+	    read_lock(&tasklist_lock);
+		do_each_thread(task_grp, task_thr) {
+			if (pid == task_pid_nr(task_thr)) {
+				printk(KERN_INFO "<%s> killed by <%s>%s\n", task_thr->comm, current->comm, ((sig == SIGKILL) ? "!" : "."));
+			}
+		} while_each_thread(task_grp, task_thr);
+	    read_unlock(&tasklist_lock);
+	}
+	
+
 	prepare_kill_siginfo(sig, &info);
 
 	return kill_something_info(sig, &info, pid);

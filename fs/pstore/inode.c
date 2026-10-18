@@ -368,6 +368,11 @@ int pstore_mkfile(struct dentry *root, struct pstore_record *record)
 		scnprintf(name, sizeof(name), "pmsg-%s-%llu",
 			  record->psi->name, record->id);
 		break;
+#ifdef CONFIG_PSTORE_SUMMARY
+	case PSTORE_TYPE_SUMMARY:
+		scnprintf(name, sizeof(name), "smry-%s-%lld", record->psi->name, record->id);
+		break;
+#endif
 	case PSTORE_TYPE_PPC_OPAL:
 		scnprintf(name, sizeof(name), "powerpc-opal-%s-%llu",
 			  record->psi->name, record->id);

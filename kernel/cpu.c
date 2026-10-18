@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /* CPU control.
  * (C) 2001, 2002, 2003, 2004 Rusty Russell
  *
@@ -39,6 +42,8 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/cpuhp.h>
 #include <linux/sched/clock.h>
+
+#include <linux/switch_logout.h>
 
 #include "smpboot.h"
 
@@ -2464,11 +2469,15 @@ void __init boot_cpu_init(void)
 {
 	int cpu = smp_processor_id();
 
+	poweron_bench_printk("@BT %s S\n", __func__);
+
 	/* Mark the boot cpu "present", "online" etc for SMP and UP case */
 	set_cpu_online(cpu, true);
 	set_cpu_active(cpu, true);
 	set_cpu_present(cpu, true);
 	set_cpu_possible(cpu, true);
+
+	poweron_bench_printk("@BT %s E\n", __func__);
 
 #ifdef CONFIG_SMP
 	__boot_cpu_id = cpu;

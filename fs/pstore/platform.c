@@ -44,7 +44,8 @@
 #include <linux/uaccess.h>
 #include <linux/jiffies.h>
 #include <linux/workqueue.h>
-
+#include <linux/time.h>
+#define TIME_SIZE 22
 #include "internal.h"
 
 /*
@@ -66,6 +67,7 @@ static DEFINE_TIMER(pstore_timer, pstore_timefunc);
 
 static void pstore_dowork(struct work_struct *);
 static DECLARE_WORK(pstore_work, pstore_dowork);
+static void pstore_console_logtime_write(struct console *con);
 
 /*
  * pstore_lock just protects "psinfo" during
@@ -484,6 +486,9 @@ static void pstore_console_write(struct console *con, const char *s, unsigned c)
 {
 	struct pstore_record record;
 
+    if (*s == '[') {
+        pstore_console_logtime_write(con);
+    }
 	pstore_record_init(&record, psinfo);
 	record.type = PSTORE_TYPE_CONSOLE;
 
@@ -492,8 +497,38 @@ static void pstore_console_write(struct console *con, const char *s, unsigned c)
 	psinfo->write(&record);
 }
 
+static void pstore_console_writex(struct console *con, int lvl, const char *s, unsigned c)
+{
+        if (*s == '[') {
+                const char lvlstr[] = {
+                        '<', lvl % 10 + '0', '>'
+                };
+                const char *plvl = lvlstr;
+                unsigned int l = sizeof(lvlstr) / sizeof(char);
+                pstore_console_write(con, plvl, l);
+        }
+        pstore_console_write(con, s, c);
+}
+static void pstore_console_logtime_write(struct console *con)
+{
+    struct timespec now;
+    struct tm tm;
+    char time_buf[TIME_SIZE];
+    unsigned int tsize;
+
+    getnstimeofday(&now);
+    time_to_tm(now.tv_sec, 0, &tm);
+
+    snprintf(time_buf, sizeof(time_buf), "%02d-%02d %02d:%02d:%02d.%06ld",
+                 tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, now.tv_nsec / 1000);
+
+    tsize = sizeof(time_buf) / sizeof(char);
+    pstore_console_write(con, (const char *)time_buf, tsize - 1);
+}
+
 static struct console pstore_console = {
 	.name	= "pstore",
+        .writex	= pstore_console_writex,
 	.write	= pstore_console_write,
 	.flags	= CON_PRINTBUFFER | CON_ENABLED | CON_ANYTIME,
 	.index	= -1,

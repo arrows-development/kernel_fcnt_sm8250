@@ -236,6 +236,7 @@ static bool wsa881x_volatile_register(struct device *dev, unsigned int reg)
 	case WSA881X_TEMP_DOUT_MSB:
 	case WSA881X_TEMP_DOUT_LSB:
 	case WSA881X_TEMP_OP:
+	case WSA881X_ADC_EN_SEL_IBAIS:
 	case WSA881X_SPKR_PROT_SAR:
 		return true;
 	default:

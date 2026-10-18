@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
@@ -2887,6 +2890,8 @@ static ssize_t dsi_host_transfer(struct mipi_dsi_host *host,
 	}
 
 	display = to_dsi_display(host);
+	if (!display->panel->connection)
+	    return rc;
 
 	/* Avoid sending DCS commands when ESD recovery is pending */
 	if (atomic_read(&display->panel->esd_recovery_pending)) {

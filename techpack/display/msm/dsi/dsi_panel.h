@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
@@ -117,6 +120,7 @@ struct dsi_backlight_config {
 
 	u32 bl_min_level;
 	u32 bl_max_level;
+	u32 bl_super_clear_level;
 	u32 brightness_max_level;
 	u32 bl_level;
 	u32 bl_scale;
@@ -223,6 +227,7 @@ struct dsi_panel {
 	bool sync_broadcast_en;
 
 	int panel_test_gpio;
+	bool connection;
 	int power_mode;
 	enum dsi_panel_physical_type panel_type;
 };

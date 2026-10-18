@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
@@ -89,8 +92,17 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 		brightness = display->panel->bl_config.bl_max_level;
 
 	/* map UI brightness into driver backlight level with rounding */
+	if (display->panel->bl_config.bl_super_clear_level == 0) {
 	bl_lvl = mult_frac(brightness, display->panel->bl_config.bl_max_level,
 			display->panel->bl_config.brightness_max_level);
+	} else {
+		if (brightness >= display->panel->bl_config.brightness_max_level) {
+			bl_lvl = display->panel->bl_config.bl_super_clear_level;
+		} else {
+			bl_lvl = mult_frac(brightness, display->panel->bl_config.bl_max_level,
+					(display->panel->bl_config.brightness_max_level - 1));
+		}
+	}
 
 	if (!bl_lvl && brightness)
 		bl_lvl = 1;
@@ -100,6 +112,11 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 		return 0;
 	}
 
+	if (display->panel->bl_config.bl_level == 0 && bl_lvl != 0) {
+		SDE_INFO("[DISP]brightness non zero (%d)\n", brightness);
+	} else if (display->panel->bl_config.bl_level != 0 && bl_lvl == 0) {
+		SDE_INFO("[DISP]brightness zero\n");
+	}
 	if (c_conn->ops.set_backlight) {
 		/* skip notifying user space if bl is 0 */
 		if (brightness != 0) {

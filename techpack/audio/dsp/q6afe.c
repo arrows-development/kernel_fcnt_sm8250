@@ -2,6 +2,9 @@
 /* Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
  * Copyright (c) 2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 #include <linux/slab.h>
 #include <linux/debugfs.h>
 #include <linux/kernel.h>
@@ -920,7 +923,8 @@ static int32_t sp_make_afe_callback(uint32_t opcode, uint32_t *payload,
 
 static void afe_notify_dc_presence(void)
 {
-	pr_debug("%s: DC detected\n", __func__);
+//	pr_debug("%s: DC detected\n", __func__);
+	pr_info("%s: DC detected\n", __func__);
 	msm_aud_evt_notifier_call_chain(MSM_AUD_DC_EVENT, NULL);
 
 	schedule_work(&this_afe.afe_dc_work);

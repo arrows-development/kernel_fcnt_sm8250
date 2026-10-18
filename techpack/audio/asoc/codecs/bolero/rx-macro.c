@@ -2,6 +2,9 @@
 /* Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
  * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -84,6 +87,9 @@ static const struct snd_kcontrol_new name##_mux = \
 #define RX_MACRO_MOD_GAIN (RX_MACRO_GAIN_VAL_UNITY + 6)
 
 #define COMP_MAX_COEFF 25
+
+static bool mute_rx0_flg = false; //headset Lch
+static bool mute_rx1_flg = false; //headset Rch
 
 struct wcd_imped_val {
 	u32 imped_val;
@@ -1363,10 +1369,24 @@ static int rx_macro_event_handler(struct snd_soc_component *component,
 					RX_MACRO_RX_PATH_OFFSET);
 		reg_mix = BOLERO_CDC_RX_RX0_RX_PATH_MIX_CTL + (rx_idx *
 					RX_MACRO_RX_PATH_OFFSET);
+		if (reg == BOLERO_CDC_RX_RX0_RX_PATH_CTL) {
+			if (!mute_rx0_flg) {
+				snd_soc_component_update_bits(component, reg, 0x10, val);
+				snd_soc_component_update_bits(component, reg_mix, 0x10, val);
+			}
+		}
+		else if (reg == BOLERO_CDC_RX_RX1_RX_PATH_CTL) {
+			if (!mute_rx1_flg) {
+				snd_soc_component_update_bits(component, reg, 0x10, val);
+				snd_soc_component_update_bits(component, reg_mix, 0x10, val);
+			}
+		}
+		else {
 		snd_soc_component_update_bits(component, reg,
 				0x10, val);
 		snd_soc_component_update_bits(component, reg_mix,
 				0x10, val);
+		}
 		break;
 	case BOLERO_MACRO_EVT_RX_COMPANDER_SOFT_RST:
 		rx_idx = data >> 0x10;
@@ -3039,6 +3059,59 @@ static int rx_macro_set_iir_gain(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+static const char *rx_macro_force_mute_param_text[] = {
+	"MUTE_RX0_OFF", "MUTE_RX0_ON", "MUTE_RX1_OFF", "MUTE_RX1_ON"
+};
+
+static const struct soc_enum rx_macro_force_mute_param_enum =
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(rx_macro_force_mute_param_text), rx_macro_force_mute_param_text);
+
+static int rx_macro_force_mute_get(struct snd_kcontrol *kcontrol,
+				    struct snd_ctl_elem_value *ucontrol)
+{
+	pr_debug("%s: called\n", __func__);
+	return 0;
+}
+
+static int rx_macro_force_mute_set(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+				snd_soc_kcontrol_component(kcontrol);
+
+	pr_debug("%s: control value = %d \n", __func__, (int)ucontrol->value.integer.value[0]);
+	switch(ucontrol->value.integer.value[0]) {
+	case 0:         // "MUTE_RX0_OFF"
+		pr_debug("%s: Rx Force MUTE_RX0_OFF\n", __func__);
+		mute_rx0_flg = false;
+		snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX0_RX_PATH_CTL, 0x10, 0x00);
+		snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX0_RX_PATH_MIX_CTL, 0x10, 0x00);
+		break;
+	case 1:         // "MUTE_RX0_ON"
+		pr_debug("%s: Rx Force MUTE_RX0_ON\n", __func__);
+		mute_rx0_flg = true;
+		snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX0_RX_PATH_CTL, 0x10, 0x10);
+		snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX0_RX_PATH_MIX_CTL, 0x10, 0x10);
+		break;
+	case 2:         // "MUTE_RX1_OFF"
+		pr_debug("%s: Rx Force MUTE_RX1_OFF\n", __func__);
+		mute_rx1_flg = false;
+		snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX1_RX_PATH_CTL, 0x10, 0x00);
+		snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX1_RX_PATH_MIX_CTL, 0x10, 0x00);
+		break;
+	case 3:         // "MUTE_RX1_ON"
+		pr_debug("%s: Rx Force MUTE_RX1_ON\n", __func__);
+		mute_rx1_flg = true;
+		snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX1_RX_PATH_CTL, 0x10, 0x10);
+		snd_soc_component_update_bits(component, BOLERO_CDC_RX_RX1_RX_PATH_MIX_CTL, 0x10, 0x10);
+		break;
+	default:
+		pr_err("%s: Rx Force MUTE illegal input value (%d)\n", __func__, (int) ucontrol->value.integer.value[0]);
+		break;
+	}
+	return 0;
+}
+
 static const struct snd_kcontrol_new rx_macro_snd_controls[] = {
 	SOC_SINGLE_SX_TLV("RX_RX0 Digital Volume",
 			  BOLERO_CDC_RX_RX0_RX_VOL_CTL,
@@ -3169,6 +3242,8 @@ static const struct snd_kcontrol_new rx_macro_snd_controls[] = {
 	SOC_SINGLE_MULTI_EXT("IIR1 Band5", IIR1, BAND5, 255, 0, 5,
 		rx_macro_iir_band_audio_mixer_get,
 		rx_macro_iir_band_audio_mixer_put),
+	SOC_ENUM_EXT("Rx Macro Force Mute", rx_macro_force_mute_param_enum,
+		rx_macro_force_mute_get, rx_macro_force_mute_set),
 };
 
 static int rx_macro_enable_echo(struct snd_soc_dapm_widget *w,

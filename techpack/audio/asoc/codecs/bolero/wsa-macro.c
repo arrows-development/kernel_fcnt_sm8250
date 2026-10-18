@@ -2,6 +2,9 @@
 /* Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
  * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -20,6 +23,10 @@
 #include "bolero-cdc-registers.h"
 #include "wsa-macro.h"
 #include "bolero-clk-rsc.h"
+
+static u8 wsa_lch_speaker_gain = 0x00;
+static u8 wsa_rch_speaker_gain = 0x00;
+struct snd_soc_component *component_external;
 
 #define AUTO_SUSPEND_DELAY  50 /* delay in msec */
 #define WSA_MACRO_MAX_OFFSET 0x1000
@@ -1536,8 +1543,20 @@ static int wsa_macro_enable_prim_interpolator(
 			snd_soc_component_update_bits(component,
 				prim_int_reg + WSA_MACRO_RX_PATH_CFG3_OFFSET,
 				0x03, 0x03);
+			if (prim_int_reg == BOLERO_CDC_WSA_RX0_RX_PATH_CTL) {
+				if (wsa_priv->wsa_digital_mute_status[WSA_MACRO_RX0] == 0) {
+					snd_soc_component_update_bits(component, prim_int_reg, 0x10, 0x10);
+				}
+			}
+			else if (prim_int_reg == BOLERO_CDC_WSA_RX1_RX_PATH_CTL) {
+				if (wsa_priv->wsa_digital_mute_status[WSA_MACRO_RX1] == 0) {
+					snd_soc_component_update_bits(component, prim_int_reg, 0x10, 0x10);
+				}
+			}
+			else {
 			snd_soc_component_update_bits(component, prim_int_reg,
 					    0x10, 0x10);
+			}
 			wsa_macro_hd2_control(component, prim_int_reg, event);
 			snd_soc_component_update_bits(component,
 				prim_int_reg + WSA_MACRO_RX_PATH_DSMDEM_OFFSET,
@@ -1546,8 +1565,22 @@ static int wsa_macro_enable_prim_interpolator(
 		if ((reg != prim_int_reg) &&
 		    ((snd_soc_component_read32(
 				component, prim_int_reg)) & 0x10))
+			{
+				if (reg == BOLERO_CDC_WSA_RX0_RX_PATH_CTL) {
+					if (wsa_priv->wsa_digital_mute_status[WSA_MACRO_RX0] == 0) {
+						snd_soc_component_update_bits(component, reg, 0x10, 0x10);
+					}
+				}
+				else if (reg == BOLERO_CDC_WSA_RX1_RX_PATH_CTL) {
+					if (wsa_priv->wsa_digital_mute_status[WSA_MACRO_RX1] == 0) {
+						snd_soc_component_update_bits(component, reg, 0x10, 0x10);
+					}
+				}
+				else {
 			snd_soc_component_update_bits(component, reg,
 					0x10, 0x10);
+				}
+			}
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		wsa_priv->prim_int_users[ind]--;
@@ -1729,6 +1762,10 @@ static int wsa_macro_spk_boost_event(struct snd_soc_dapm_widget *w,
 				snd_soc_dapm_to_component(w->dapm);
 	u16 boost_path_ctl, boost_path_cfg1;
 	u16 reg, reg_mix;
+	struct device *wsa_dev = NULL;
+	struct wsa_macro_priv *wsa_priv = NULL;
+	if (!wsa_macro_get_data(component, &wsa_dev, &wsa_priv, __func__))
+		return -EINVAL;
 
 	dev_dbg(component->dev, "%s %s %d\n", __func__, w->name, event);
 
@@ -1759,7 +1796,19 @@ static int wsa_macro_spk_boost_event(struct snd_soc_dapm_widget *w,
 						0x10, 0x00);
 		break;
 	case SND_SOC_DAPM_POST_PMU:
+		if (reg == BOLERO_CDC_WSA_RX0_RX_PATH_CTL) {
+			if(wsa_priv->wsa_digital_mute_status[WSA_MACRO_RX0] == 0) {
+				snd_soc_component_update_bits(component, reg, 0x10, 0x00);
+			}
+		}
+		else if (reg == BOLERO_CDC_WSA_RX1_RX_PATH_CTL) {
+			if(wsa_priv->wsa_digital_mute_status[WSA_MACRO_RX1] == 0) {
+				snd_soc_component_update_bits(component, reg, 0x10, 0x00);
+			}
+		}
+		else {
 		snd_soc_component_update_bits(component, reg, 0x10, 0x00);
+		}
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		snd_soc_component_update_bits(component, boost_path_ctl,
@@ -2350,6 +2399,58 @@ static int wsa_macro_soft_clip_enable_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+int wsa_macro_component_update_bits(unsigned int reg, unsigned int mask, unsigned int val)
+{
+	int ret = -1;
+	if(component_external){
+		ret = snd_soc_component_update_bits(component_external, reg, mask, val);
+	}
+	return ret;
+}
+EXPORT_SYMBOL_GPL(wsa_macro_component_update_bits);
+
+u8 wsa_lch_speaker_gain_get(void)
+{
+	return wsa_lch_speaker_gain;
+}
+EXPORT_SYMBOL_GPL(wsa_lch_speaker_gain_get);
+
+u8 wsa_rch_speaker_gain_get(void)
+{
+	return wsa_rch_speaker_gain;
+}
+EXPORT_SYMBOL_GPL(wsa_rch_speaker_gain_get);
+
+int wsa_speaker_gain_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
+{
+	struct soc_mixer_control *mc = (struct soc_mixer_control *)kcontrol->private_value;
+	unsigned int reg = mc->reg;
+
+	if(reg == BOLERO_CDC_WSA_RX0_RX_VOL_CTL){
+		wsa_lch_speaker_gain = ucontrol->value.integer.value[0] - 84;
+		pr_debug("%s: value=%d. set lch_speaker_gain=0x%02x\n", __func__, (int)ucontrol->value.integer.value[0], wsa_lch_speaker_gain);
+	} else if(reg == BOLERO_CDC_WSA_RX1_RX_VOL_CTL){
+		wsa_rch_speaker_gain = ucontrol->value.integer.value[0] - 84;
+		pr_debug("%s: value=%d. set rch_speaker_gain=0x%02x\n", __func__, (int)ucontrol->value.integer.value[0], wsa_rch_speaker_gain);
+	}
+	pr_info("%s: lch_speaker_gain=0x%02x rch_speaker_gain=0x%02x\n", __func__, wsa_lch_speaker_gain, wsa_rch_speaker_gain);
+    return snd_soc_put_volsw_sx(kcontrol,ucontrol);
+}
+EXPORT_SYMBOL_GPL(wsa_speaker_gain_put);
+
+#define SOC_SINGLE_SX_TLV_SPK(xname, xreg, xshift, xmin, xmax, tlv_array) \
+{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, \
+	.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | \
+	SNDRV_CTL_ELEM_ACCESS_READWRITE, \
+	.tlv.p  = (tlv_array),\
+	.info = snd_soc_info_volsw_sx, \
+	.get = snd_soc_get_volsw_sx,\
+	.put = wsa_speaker_gain_put, \
+	.private_value = (unsigned long)&(struct soc_mixer_control) \
+		{.reg = xreg, .rreg = xreg, \
+		.shift = xshift, .rshift = xshift, \
+		.max = xmax, .min = xmin} }
+
 static const struct snd_kcontrol_new wsa_macro_snd_controls[] = {
 	SOC_ENUM_EXT("EAR SPKR PA Gain", wsa_macro_ear_spkr_pa_gain_enum,
 		     wsa_macro_ear_spkr_pa_gain_get,
@@ -2373,10 +2474,10 @@ static const struct snd_kcontrol_new wsa_macro_snd_controls[] = {
 			WSA_MACRO_SOFTCLIP1, 1, 0,
 			wsa_macro_soft_clip_enable_get,
 			wsa_macro_soft_clip_enable_put),
-	SOC_SINGLE_SX_TLV("WSA_RX0 Digital Volume",
+	SOC_SINGLE_SX_TLV_SPK("WSA_RX0 Digital Volume",
 			  BOLERO_CDC_WSA_RX0_RX_VOL_CTL,
 			  0, -84, 40, digital_gain),
-	SOC_SINGLE_SX_TLV("WSA_RX1 Digital Volume",
+	SOC_SINGLE_SX_TLV_SPK("WSA_RX1 Digital Volume",
 			  BOLERO_CDC_WSA_RX1_RX_VOL_CTL,
 			  0, -84, 40, digital_gain),
 	SOC_SINGLE_EXT("WSA_RX0 Digital Mute", SND_SOC_NOPM, WSA_MACRO_RX0, 1,
@@ -2993,6 +3094,7 @@ static int wsa_macro_init(struct snd_soc_component *component)
 	snd_soc_dapm_sync(dapm);
 
 	wsa_priv->component = component;
+	component_external = component;
 	wsa_priv->spkr_gain_offset = WSA_MACRO_GAIN_OFFSET_0_DB;
 	wsa_macro_init_reg(component);
 

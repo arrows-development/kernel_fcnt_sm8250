@@ -2,6 +2,9 @@
 /*
  * Copyright (c) 2015-2020, The Linux Foundation. All rights reserved.
  */
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -28,6 +31,9 @@
 #include <asoc/msm-cdc-pinctrl.h>
 #include "wsa881x.h"
 #include "wsa881x-temp-sensor.h"
+#include "bolero/bolero-cdc-registers.h"
+#include <linux/kthread.h>
+#include <linux/time.h>
 
 #define DRV_NAME "wsa-codec"
 #define WSA881X_NUM_RETRY	5
@@ -151,6 +157,21 @@ static int wsa881x_ocp_poll_timer_sec = WSA881X_OCP_CTL_POLL_TIMER_SEC;
 module_param(wsa881x_ocp_poll_timer_sec, int, 0664);
 MODULE_PARM_DESC(wsa881x_ocp_poll_timer_sec, "timer for ocp ctl polling");
 
+static int lastcall_pl_flg = 0;
+static int handset_pl_flg = 0;
+static int pl_enable = 0;
+static u64 disable_recv_ms = 0;
+static bool vol_stepup_thread_flag = false;
+static struct task_struct *wsa_vol_stepup_task = NULL;
+static int speaker_enabled = 0;
+#define SPEAKER_ENABLE_LCH 0x01
+#define SPEAKER_ENABLE_RCH 0x02
+#define SPEAKER_ENABLE_STEREO 0x03
+
+extern int wsa_macro_component_update_bits(unsigned int reg, unsigned int mask, unsigned int val);
+extern u8 wsa_lch_speaker_gain_get(void);
+extern u8 wsa_rch_speaker_gain_get(void);
+
 static int32_t wsa881x_resource_acquire(struct snd_soc_component *component,
 						bool enable);
 
@@ -162,6 +183,27 @@ static const char * const wsa_pa_gain_text[] = {
 
 static const struct soc_enum wsa_pa_gain_enum =
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(wsa_pa_gain_text), wsa_pa_gain_text);
+
+static const char * const pl_enable_setting_param_text[] = {
+	"OFF", "ON"
+};
+
+static SOC_ENUM_SINGLE_EXT_DECL(pl_enable_setting_param_enum,
+			pl_enable_setting_param_text);
+
+static const char * const lastcall_pl_setting_param_text[] = {
+	"OFF", "ON"
+};
+
+static SOC_ENUM_SINGLE_EXT_DECL(lastcall_pl_setting_param_enum,
+			lastcall_pl_setting_param_text);
+
+static const char * const handset_pl_setting_param_text[] = {
+	"OFF", "ON"
+};
+
+static SOC_ENUM_SINGLE_EXT_DECL(handset_pl_setting_param_enum,
+			handset_pl_setting_param_text);
 
 static int wsa_pa_gain_get(struct snd_kcontrol *kcontrol,
 			   struct snd_ctl_elem_value *ucontrol)
@@ -254,6 +296,66 @@ static int wsa881x_set_t0_init(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int pl_enable_setting_get(struct snd_kcontrol *kcontrol,
+                               struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	ucontrol->value.integer.value[0] = pl_enable;
+	dev_dbg(component->dev, "%s: pl_enable=%d\n", __func__,pl_enable);
+	return 0;
+}
+
+static int pl_enable_setting_set(struct snd_kcontrol *kcontrol,
+                               struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	pl_enable = ucontrol->value.integer.value[0];
+	dev_dbg(component->dev, "%s: pl_enable=%d\n", __func__,pl_enable);
+	return 0;
+}
+
+static int lastcall_pl_setting_get(struct snd_kcontrol *kcontrol,
+                               struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	ucontrol->value.integer.value[0] = lastcall_pl_flg;
+	dev_dbg(component->dev, "%s: lastcall_pl_flg=%d\n", __func__,lastcall_pl_flg);
+	return 0;
+}
+
+static int lastcall_pl_setting_set(struct snd_kcontrol *kcontrol,
+                               struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	lastcall_pl_flg = ucontrol->value.integer.value[0];
+	dev_dbg(component->dev, "%s: lastcall_pl_flg=%d\n", __func__,lastcall_pl_flg);
+	return 0;
+}
+
+static int handset_pl_setting_get(struct snd_kcontrol *kcontrol,
+                               struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	ucontrol->value.integer.value[0] = handset_pl_flg;
+	dev_dbg(component->dev, "%s: handset_pl_flg=%d\n", __func__,handset_pl_flg);
+	return 0;
+}
+
+static int handset_pl_setting_set(struct snd_kcontrol *kcontrol,
+                               struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	handset_pl_flg = ucontrol->value.integer.value[0];
+	dev_dbg(component->dev, "%s: handset_pl_flg=%d\n", __func__,handset_pl_flg);
+	return 0;
+}
+
 static const struct snd_kcontrol_new wsa_snd_controls[] = {
 	SOC_ENUM_EXT("WSA PA Gain", wsa_pa_gain_enum,
 		     wsa_pa_gain_get, wsa_pa_gain_put),
@@ -261,6 +363,12 @@ static const struct snd_kcontrol_new wsa_snd_controls[] = {
 		wsa881x_get_mute, wsa881x_set_mute),
 	SOC_SINGLE_EXT("WSA T0 Init", SND_SOC_NOPM, 0, 1, 0,
 		wsa881x_get_t0_init, wsa881x_set_t0_init),
+	SOC_ENUM_EXT("PL ENABLE", pl_enable_setting_param_enum,
+		pl_enable_setting_get, pl_enable_setting_set),
+	SOC_ENUM_EXT("LASTCALL PL", lastcall_pl_setting_param_enum,
+		lastcall_pl_setting_get, lastcall_pl_setting_set),
+	SOC_ENUM_EXT("HANDSET PL", handset_pl_setting_param_enum,
+		handset_pl_setting_get, handset_pl_setting_set),
 };
 
 static int codec_debug_open(struct inode *inode, struct file *file)
@@ -1053,6 +1161,44 @@ static void wsa881x_ocp_ctl_work(struct work_struct *work)
 			msecs_to_jiffies(wsa881x_ocp_poll_timer_sec * 1000));
 }
 
+static int wsa_vol_stepup_thread(void *data)
+{
+    struct snd_soc_component *component = (struct snd_soc_component *)data;
+	int8_t stepup_table_Lch[16] = {-40, -38, -36, -34, -32, -30, -28, -26, -24, -22, -20, -18, -15, -9, -3, 0};
+	int8_t stepup_table_Rch[16] = {-40, -38, -36, -34, -32, -30, -28, -26, -24, -22, -20, -18, -15, -9, -3, 0};
+	u8 value_Lch = 0;
+	u8 value_Rch = 0;
+
+	int i = 0;
+
+	/* vol_stepup_thread start */
+	vol_stepup_thread_flag = true;
+
+	pr_info("%s Volume stepup thread start,\n", __func__);
+	for(i = 0; i < 16; i++) {
+		value_Lch = wsa_lch_speaker_gain_get() + stepup_table_Lch[i];
+		value_Rch = wsa_rch_speaker_gain_get() + stepup_table_Rch[i];
+
+		dev_dbg(component->dev, "%s: WSA_RX0 Digital Volume %x\n", __func__, value_Lch);
+		dev_dbg(component->dev, "%s: WSA_RX1 Digital Volume %x\n", __func__, value_Rch);
+		wsa_macro_component_update_bits(BOLERO_CDC_WSA_RX0_RX_VOL_CTL, 0xFF, value_Lch);
+		wsa_macro_component_update_bits(BOLERO_CDC_WSA_RX1_RX_VOL_CTL, 0xFF, value_Rch);
+		if(i < 15){
+			msleep(500);
+			if(kthread_should_stop()) {
+				pr_info("%s thread stop ", __func__);
+				break;
+			}
+		}
+	}
+	pr_info("%s Volume stepup thread end,\n", __func__);
+
+	/* vol_stepup_thread exit */
+	vol_stepup_thread_flag = false;
+
+	return 0;
+}
+
 static int wsa881x_spkr_pa_event(struct snd_soc_dapm_widget *w,
 			struct snd_kcontrol *kcontrol, int event)
 {
@@ -1060,6 +1206,10 @@ static int wsa881x_spkr_pa_event(struct snd_soc_dapm_widget *w,
 			snd_soc_dapm_to_component(w->dapm);
 	struct wsa881x_priv *wsa881x = snd_soc_component_get_drvdata(component);
 	int min_gain, max_gain;
+	struct timespec64 disable_recv_ts;
+	struct timespec64 nowtime_ts;
+	static u64 nowtime_ms = 0;
+	int ret_pl = 0;
 
 	dev_dbg(component->dev, "%s: %s %d\n", __func__, w->name, event);
 	switch (event) {
@@ -1084,6 +1234,47 @@ static int wsa881x_spkr_pa_event(struct snd_soc_dapm_widget *w,
 
 		break;
 	case SND_SOC_DAPM_POST_PMU:
+		if(!strcmp(w->name, "SpkrLeft SPKR PGA")){
+			speaker_enabled |= SPEAKER_ENABLE_LCH;
+		} else if (!strcmp(w->name, "SpkrRight SPKR PGA")) {
+			speaker_enabled |= SPEAKER_ENABLE_RCH;
+		}
+		if(((speaker_enabled & SPEAKER_ENABLE_LCH) == SPEAKER_ENABLE_LCH)
+			&& !handset_pl_flg && !lastcall_pl_flg && pl_enable){
+			ktime_get_raw_ts64(&nowtime_ts);
+			nowtime_ms = (nowtime_ts.tv_sec * 1000) + (nowtime_ts.tv_nsec / 1000000);
+			/* within 3 sec. receiver -> speaker, and call finished */
+			dev_dbg(component->dev, "%s: nowtime_ms=%d disable_recv_ms=%d\n", __func__, nowtime_ms, disable_recv_ms);
+			if((disable_recv_ms <= nowtime_ms) && (nowtime_ms < disable_recv_ms + 3 * 1000)) {
+				if(vol_stepup_thread_flag) {
+					pr_err("%s vol_stepup_thread working, stop thread.", __func__);
+					if(NULL!=wsa_vol_stepup_task) {
+						kthread_stop(wsa_vol_stepup_task);
+						wsa_vol_stepup_task = NULL;
+					}
+				}
+				pr_info("%s kthread run wsa_vol_stepup_thread\n", __func__);
+				wsa_vol_stepup_task = kthread_run(wsa_vol_stepup_thread, component, "wsa_volstepup");
+				if (IS_ERR(wsa_vol_stepup_task)) {
+					ret_pl = PTR_ERR(wsa_vol_stepup_task);
+					pr_err("%s kthread run failed ret = %d\n", __func__, ret_pl);
+				}
+			} else {
+				disable_recv_ms = 0;
+			}
+		} else {
+			if(vol_stepup_thread_flag) {
+				pr_err("%s vol_stepup_thread working, stop thread.", __func__);
+				if(NULL!=wsa_vol_stepup_task) {
+					kthread_stop(wsa_vol_stepup_task);
+					wsa_vol_stepup_task = NULL;
+
+					/* Default volume set speaker */
+					wsa_macro_component_update_bits(BOLERO_CDC_WSA_RX0_RX_VOL_CTL, 0xFF, wsa_lch_speaker_gain_get());
+					wsa_macro_component_update_bits(BOLERO_CDC_WSA_RX1_RX_VOL_CTL, 0xFF, wsa_rch_speaker_gain_get());
+			    }
+			}
+		}
 		if (!wsa881x->bolero_dev)
 			snd_soc_component_update_bits(component,
 					      WSA881X_SPKR_DRV_EN,
@@ -1119,8 +1310,22 @@ static int wsa881x_spkr_pa_event(struct snd_soc_dapm_widget *w,
 		/* Force remove group */
 		swr_remove_from_group(wsa881x->swr_slave,
 				      wsa881x->swr_slave->dev_num);
+
+		if(!strcmp(w->name, "SpkrLeft SPKR PGA")){
+			dev_info(component->dev,"%s: POST_PMU Lch addr[0x%04x]=0x%02x\n", __func__, WSA881X_CDC_DIG_CLK_CTL, snd_soc_component_read32(component, WSA881X_CDC_DIG_CLK_CTL));
+			dev_info(component->dev,"%s: POST_PMU Lch addr[0x%04x]=0x%02x\n", __func__, WSA881X_SPKR_DRV_EN, snd_soc_component_read32(component, WSA881X_SPKR_DRV_EN));
+		} else if (!strcmp(w->name, "SpkrRight SPKR PGA")) {
+			dev_info(component->dev,"%s: POST_PMU Rch addr[0x%04x]=0x%02x\n", __func__, WSA881X_CDC_DIG_CLK_CTL, snd_soc_component_read32(component, WSA881X_CDC_DIG_CLK_CTL));
+			dev_info(component->dev,"%s: POST_PMU Rch addr[0x%04x]=0x%02x\n", __func__, WSA881X_SPKR_DRV_EN, snd_soc_component_read32(component, WSA881X_SPKR_DRV_EN));
+		}
+
 		break;
 	case SND_SOC_DAPM_POST_PMD:
+		if(!strcmp(w->name, "SpkrLeft SPKR PGA")){
+			speaker_enabled &= ~SPEAKER_ENABLE_LCH;
+		} else if (!strcmp(w->name, "SpkrRight SPKR PGA")) {
+			speaker_enabled &= ~SPEAKER_ENABLE_RCH;
+		}
 		snd_soc_component_update_bits(component,
 					      WSA881X_SPKR_DRV_EN,
 					      0x80, 0x00);
@@ -1135,6 +1340,20 @@ static int wsa881x_spkr_pa_event(struct snd_soc_dapm_widget *w,
 		cancel_delayed_work_sync(&wsa881x->ocp_ctl_work);
 		snd_soc_component_update_bits(component, WSA881X_SPKR_OCP_CTL,
 				0xC0, 0xC0);
+		if(handset_pl_flg) {
+			ktime_get_raw_ts64(&disable_recv_ts);
+			disable_recv_ms = (disable_recv_ts.tv_sec * 1000) + (disable_recv_ts.tv_nsec / 1000000);
+			dev_dbg(component->dev, "%s: handset disabled. pl_flag=%d disable_recv_ms=%d\n", __func__,
+				handset_pl_flg, disable_recv_ms);
+		}
+		if(!strcmp(w->name, "SpkrLeft SPKR PGA")){
+			dev_info(component->dev,"%s: POST_PMD Lch addr[0x%04x]=0x%02x\n", __func__, WSA881X_CDC_DIG_CLK_CTL, snd_soc_component_read32(component, WSA881X_CDC_DIG_CLK_CTL));
+			dev_info(component->dev,"%s: POST_PMD Lch addr[0x%04x]=0x%02x\n", __func__, WSA881X_SPKR_DRV_EN, snd_soc_component_read32(component, WSA881X_SPKR_DRV_EN));
+		} else if (!strcmp(w->name, "SpkrRight SPKR PGA")) {
+			dev_info(component->dev,"%s: POST_PMD Rch addr[0x%04x]=0x%02x\n", __func__, WSA881X_CDC_DIG_CLK_CTL, snd_soc_component_read32(component, WSA881X_CDC_DIG_CLK_CTL));
+			dev_info(component->dev,"%s: POST_PMD Rch addr[0x%04x]=0x%02x\n", __func__, WSA881X_SPKR_DRV_EN, snd_soc_component_read32(component, WSA881X_SPKR_DRV_EN));
+		}
+
 		break;
 	}
 	return 0;

@@ -1,3 +1,6 @@
+#----------------------------------------------------------------------------
+# (C) 2021 FCNT LIMITED
+#----------------------------------------------------------------------------
 # Use this by setting
 #   LOCAL_HEADER_LIBRARIES := audio_kernel_headers
 
@@ -20,6 +23,7 @@ LOCAL_ADDITIONAL_DEPENDENCIES += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr
 GEN := $(addprefix $(UAPI_OUT)/,$(AUDIO_KERNEL_HEADERS))
 $(GEN): $(KERNEL_USR)
 $(GEN): PRIVATE_PATH := $(MYLOCAL_PATH)
+$(GEN): $(TARGET_PREBUILT_INT_KERNEL)
 $(GEN): PRIVATE_CUSTOM_TOOL = $(shell cd $(PRODUCT_OUT)/obj/KERNEL_OBJ; $(BUILD_ROOT_RELATIVE)$(HEADER_INSTALL_DIR)/headers_install.sh $(BUILD_ROOT_RELATIVE)$(dir $@) $(BUILD_ROOT_RELATIVE)$(subst $(UAPI_OUT),$(MYLOCAL_PATH),$(dir $@)) $(notdir $@))
 $(GEN): $(addprefix $(MYLOCAL_PATH)/,$(AUDIO_KERNEL_HEADERS))
 	$(transform-generated-source)

@@ -2,6 +2,9 @@
 /* Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
  * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -2824,6 +2827,8 @@ undefined_rate:
 
 static const struct tx_macro_reg_mask_val tx_macro_reg_init[] = {
 	{BOLERO_CDC_TX0_TX_PATH_SEC7, 0x3F, 0x0A},
+	{BOLERO_CDC_TX2_TX_PATH_CFG1, 0x01, 0x00},
+	{BOLERO_CDC_TX1_TX_PATH_CFG1, 0x01, 0x00},
 };
 
 static int tx_macro_init(struct snd_soc_component *component)

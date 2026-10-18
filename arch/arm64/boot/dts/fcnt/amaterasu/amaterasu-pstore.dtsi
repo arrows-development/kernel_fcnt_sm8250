@@ -8,6 +8,6 @@
 
 / {
 	chosen {
-		bootargs = "rcupdate.rcu_expedited=1 rcu_nocbs=0-7 kpti=off ramoops.mem_address=0xB9500000 ramoops.mem_size=0x300000 ramoops.console_size=0x80000 ramoops.smry_size=0x1000 ramoops.pmsg_size=0x270000 ramoops.ftrace_size=0x0 ramoops.record_size=0x0 ramoops.dump_oops=0 ignore_loglevel=1";
+		bootargs = "rcupdate.rcu_expedited=1 rcu_nocbs=0-7 kpti=off ramoops.mem_address=0xB9500000 ramoops.mem_size=0x300000 ramoops.console_size=0x80000 ramoops.smry_size=0x1000 ramoops.pmsg_size=0x200000 ramoops.ftrace_size=0x0 ramoops.record_size=0x40000 ramoops.dump_oops=1 ignore_loglevel=1";
 	};
 };

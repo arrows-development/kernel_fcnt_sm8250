@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * drivers/base/power/wakeup.c - System wakeup events framework
  *
@@ -854,6 +857,7 @@ EXPORT_SYMBOL_GPL(pm_get_active_wakeup_sources);
 
 void pm_print_active_wakeup_sources(void)
 {
+#if 0
 	struct wakeup_source *ws;
 	int srcuidx, active = 0;
 	struct wakeup_source *last_activity_ws = NULL;
@@ -875,6 +879,35 @@ void pm_print_active_wakeup_sources(void)
 		pr_debug("last active wakeup source: %s\n",
 			last_activity_ws->name);
 	srcu_read_unlock(&wakeup_srcu, srcuidx);
+#endif
+	unsigned int cnt, inpr;
+	struct wakeup_source *ws;
+	ktime_t now = ktime_get();
+	int64_t active_sec = 0;
+	uint32_t active_ms = 0;
+	long timeout;
+
+	split_counters(&cnt, &inpr);
+	if (inpr != 0) {
+		rcu_read_lock();
+		list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
+			if (ws->active) {
+				active_sec = ktime_to_ns( ktime_sub(now, ws->last_time) );
+				active_ms = do_div(active_sec, NSEC_PER_SEC);
+
+				if (ws->timer_expires) {
+					timeout = ws->timer_expires - jiffies;
+
+					pr_info("active wake lock %s, active_since %lld.%09u seconds, time left %ld\n",
+						ws->name, active_sec, active_ms, timeout);
+				} else {
+					pr_info("active wake lock %s, active_since %lld.%09u seconds\n",
+						ws->name, active_sec, active_ms);
+				}
+			}
+		}
+		rcu_read_unlock();
+	}
 }
 EXPORT_SYMBOL_GPL(pm_print_active_wakeup_sources);
 

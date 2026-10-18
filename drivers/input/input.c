@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * The input core
  *
@@ -450,6 +453,11 @@ void input_event(struct input_dev *dev,
 	unsigned long flags;
 
 	if (is_event_supported(type, dev->evbit, EV_MAX)) {
+        //if(EV_KEY == type) {
+        //    if (code == KEY_POWER || code == KEY_VOLUMEUP || code == KEY_VOLUMEDOWN) {
+        //        printk("REC@REC@0 key %d %s\n",code,(value == 1) ? "press" : "release");
+        //    }
+        //}
 
 		spin_lock_irqsave(&dev->event_lock, flags);
 		input_handle_event(dev, type, code, value);

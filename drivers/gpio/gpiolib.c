@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 #include <linux/bitmap.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -33,6 +36,8 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/gpio.h>
+
+#include <linux/switch_logout.h>
 
 /* Implementation infrastructure for GPIO interfaces.
  *
@@ -87,6 +92,8 @@ static int gpiochip_add_irqchip(struct gpio_chip *gpiochip,
 static void gpiochip_irqchip_remove(struct gpio_chip *gpiochip);
 static int gpiochip_irqchip_init_valid_mask(struct gpio_chip *gpiochip);
 static void gpiochip_irqchip_free_valid_mask(struct gpio_chip *gpiochip);
+
+static int gpiolib_seq_show(struct seq_file *s, void *v);
 
 static bool gpiolib_initialized;
 
@@ -1270,6 +1277,8 @@ int gpiochip_add_data_with_key(struct gpio_chip *chip, void *data,
 	int		base = chip->base;
 	struct gpio_device *gdev;
 
+	struct seq_file *s;
+
 	/*
 	 * First: allocate and populate the internal stat container, and
 	 * set up the struct device.
@@ -1423,6 +1432,16 @@ int gpiochip_add_data_with_key(struct gpio_chip *chip, void *data,
 		if (status)
 			goto err_remove_chip;
 	}
+	if (check_and_get_table_from_NV() & BeforeInitDriver_LogType) {
+		s = switch_print_seq_alloc(GPIOLIB_SWITCH_DUMP_SIZE);
+
+		if (s) {
+			gpiolib_seq_show(s, gdev);
+			switch_print_seq_kmsg(s);
+			switch_print_seq_free(s);
+		}
+	}
+
 	return 0;
 
 err_remove_chip:
@@ -4495,3 +4514,40 @@ static int __init gpiolib_debugfs_init(void)
 subsys_initcall(gpiolib_debugfs_init);
 
 #endif	/* DEBUG_FS */
+
+#ifdef CONFIG_DEBUG_FS
+void gpiolib_switch_dump(void)
+{
+	struct gpio_device *gdev = NULL;
+	struct seq_file *s;
+
+	if (list_empty(&gpio_devices)) {
+		return;
+	}
+
+	s = switch_print_seq_alloc(GPIOLIB_SWITCH_DUMP_SIZE);
+
+	if (!s)
+		return;
+
+	list_for_each_entry(gdev, &gpio_devices, list) {
+		gpiolib_seq_show(s, gdev);
+	}
+
+	switch_print_seq_kmsg(s);
+
+	switch_print_seq_free(s);
+
+	return;
+}
+#else	/* DEBUG_FS */
+void gpiolib_switch_dump(void)
+{
+	return;
+}
+static int gpiolib_seq_show(struct seq_file *s, void *v)
+{
+        return 0;
+}
+#endif	/* DEBUG_FS */
+EXPORT_SYMBOL_GPL(gpiolib_switch_dump);

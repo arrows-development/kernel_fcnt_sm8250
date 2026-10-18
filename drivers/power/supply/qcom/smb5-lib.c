@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
@@ -20,6 +23,8 @@
 #include "step-chg-jeita.h"
 #include "storm-watch.h"
 #include "schgm-flash.h"
+#include "oem_charger_local.h"
+#include "custom_det.h" 
 
 #define smblib_err(chg, fmt, ...)		\
 	pr_err("%s: %s: " fmt, chg->name,	\
@@ -42,6 +47,56 @@
 
 static void update_sw_icl_max(struct smb_charger *chg, int pst);
 static int smblib_get_prop_typec_mode(struct smb_charger *chg);
+
+static struct smb_charger *the_chg = NULL;
+
+typedef enum {
+	CHGR_BASE_ITEM = 0,
+	DCDC_BASE_ITEM,
+	BATIF_BASE_ITEM,
+	USBIN_BASE_ITEM,
+	DCIN_BASE_ITEM,
+	TYPEC_BASE_ITEM,
+	MISC_BASE_ITEM,
+} base_item;
+
+struct oem_chg_reg_tbl {
+	base_item		base;
+	u16				offset;
+};
+
+static struct oem_chg_reg_tbl smblib_reg_tbl[CHG_DRV_CMD_NUM] = {
+	{ CHGR_BASE_ITEM,		0x06 },			/* CHG_DRV_CMD_SCHG_CHGR_BATTERY_CHARGER_STATUS_1_REG		*/
+	{ CHGR_BASE_ITEM,		0x51 },			/* CHG_DRV_CMD_SCHG_CHGR_CHGR_CFG2_REG						*/
+	{ CHGR_BASE_ITEM,		0x90 },			/* CHG_DRV_CMD_SCHG_CHGR_JEITA_EN_CFG_REG					*/
+	{ CHGR_BASE_ITEM,		0xA0 },			/* CHG_DRV_CMD_SCHG_CHGR_SAFETY_TIMER_ENABLE_CFG_REG		*/
+	{ DCDC_BASE_ITEM,		0x08 },			/* CHG_DRV_CMD_SCHG_DCDC_AICL_ICL_STATUS					*/
+	{ DCDC_BASE_ITEM,		0x0A },			/* CHG_DRV_CMD_SCHG_DCDC_AICL_STATUS						*/
+	{ USBIN_BASE_ITEM,		0x08 },			/* CHG_DRV_CMD_SCHG_USB_APSD_RESULT_STATUS_REG				*/
+	{ USBIN_BASE_ITEM,		0x10 },			/* CHG_DRV_CMD_SCHG_USB_INT_RT_STS_REG						*/
+	{ USBIN_BASE_ITEM,		0x42 },			/* CHG_DRV_CMD_SCHG_USB_CMD_ICL_OVERRIDE_REG				*/
+	{ USBIN_BASE_ITEM,		0x60 },			/* CHG_DRV_CMD_SCHG_USB_USBIN_ADAPTER_ALLOW_CFG_REG			*/
+	{ USBIN_BASE_ITEM,		0x62 },			/* CHG_DRV_CMD_SCHG_USB_USBIN_OPTIONS_1_CFG_REG				*/
+	{ USBIN_BASE_ITEM,		0x66 },			/* CHG_DRV_CMD_SCHG_USB_USBIN_ICL_OPTIONS_REG				*/
+	{ USBIN_BASE_ITEM,		0x70 },			/* CHG_DRV_CMD_SCHG_USB_USBIN_CURRENT_LIMIT_CFG_REG			*/
+	{ USBIN_BASE_ITEM,		0x80 },			/* CHG_DRV_CMD_SCHG_USB_USBIN_AICL_OPTIONS_CFG_REG			*/
+	{ USBIN_BASE_ITEM,		0x81 },			/* CHG_DRV_CMD_SCHG_USB_USBIN_5V_AICL_THRESHOLD_CFG_REG		*/
+	{ USBIN_BASE_ITEM,		0x84 },			/* CHG_DRV_CMD_SCHG_USB_USBIN_CONT_AICL_THRESHOLD_CFG_REG	*/
+	{ TYPEC_BASE_ITEM,		0x09 },			/* CHG_DRV_CMD_SCHG_TYPEC_TYPE_C_STATE_MACHINE_STATUS_REG	*/
+	{ MISC_BASE_ITEM,		0x10 },			/* CHG_DRV_CMD_SCHG_MISC_INT_RT_STS_REG						*/
+	{ MISC_BASE_ITEM,		0x43 },			/* CHG_DRV_CMD_SCHG_MISC_BARK_BITE_WDOG_PET_REG				*/
+	{ MISC_BASE_ITEM,		0x44 },			/* CHG_DRV_CMD_SCHG_MISC_AICL_CMD_REG						*/
+	{ MISC_BASE_ITEM,		0x51 },			/* CHG_DRV_CMD_SCHG_MISC_WD_CFG_REG							*/
+	{ MISC_BASE_ITEM,		0x53 },			/* CHG_DRV_CMD_SCHG_MISC_SNARL_BARK_BITE_WD_CFG_REG			*/
+	{ MISC_BASE_ITEM,		0x61 },			/* CHG_DRV_CMD_SCHG_MISC_AICL_RERUN_TIME_CFG_REG			*/
+};
+#define GET_BASE_ADDRESS(cmd)	(smblib_reg_tbl[cmd].base == CHGR_BASE_ITEM ? CHGR_BASE : \
+								 smblib_reg_tbl[cmd].base == DCDC_BASE_ITEM ? DCDC_BASE : \
+								 smblib_reg_tbl[cmd].base == BATIF_BASE_ITEM ? BATIF_BASE : \
+								 smblib_reg_tbl[cmd].base == USBIN_BASE_ITEM ? USBIN_BASE : \
+								 smblib_reg_tbl[cmd].base == DCIN_BASE_ITEM ? DCIN_BASE : \
+								 smblib_reg_tbl[cmd].base == TYPEC_BASE_ITEM ? TYPEC_BASE : \
+								 smblib_reg_tbl[cmd].base == MISC_BASE_ITEM ? MISC_BASE : 0)
 
 int smblib_read(struct smb_charger *chg, u16 addr, u8 *val)
 {
@@ -76,6 +131,80 @@ int smblib_masked_write(struct smb_charger *chg, u16 addr, u8 mask, u8 val)
 {
 	return regmap_update_bits(chg->regmap, addr, mask, val);
 }
+
+int oem_smblib_reg_read(u16 cmd, u8 *val)
+{
+	u16 addr = 0;
+	u16 base = 0;
+	int rc = 0;
+
+	if (the_chg == NULL) {
+		pr_err("%s: Preparation is not complete.\n", __func__);
+		return -EINVAL;
+	}
+
+	if (val == NULL) {
+		smblib_err(the_chg, "Invalid parameter. val:[NULL]\n");
+		return -EINVAL;
+	}
+
+	if (cmd >= CHG_DRV_CMD_NUM) {
+		smblib_err(the_chg, "Invalid parameter. cmd:[%d]\n", cmd);
+		return -EINVAL;
+	}
+
+	base = GET_BASE_ADDRESS(cmd);
+	if (base == 0) {
+		smblib_err(the_chg, "base address is invalid. cmd:[%d]\n", cmd);
+		return -EINVAL;
+	}
+
+	addr = base + smblib_reg_tbl[cmd].offset;
+
+	smblib_read(the_chg, addr, val);
+	if (rc < 0) {
+		smblib_err(the_chg, "Couldn't read. addr:[0x%04X] ret:[%d]\n",
+					addr, rc);
+		return rc;
+	}
+
+	smblib_dbg(the_chg, PR_REGISTER, "read reg:[0x%04X] val:[0x%02X]\n", addr, *val);
+
+	return rc;
+}
+EXPORT_SYMBOL_GPL(oem_smblib_reg_read);
+
+int oem_smblib_reg_mask_write(u16 cmd, u8 mask, u8 val)
+{
+	u16 base = 0;
+	u16 addr = 0;
+	int rc = 0;
+
+	if (the_chg == NULL) {
+		pr_err("%s: Preparation is not complete.\n", __func__);
+		return -EINVAL;
+	}
+
+	if (cmd >= CHG_DRV_CMD_NUM) {
+		smblib_err(the_chg, "Invalid parameter. cmd:[%d]\n", cmd);
+		return -EINVAL;
+	}
+
+	base = GET_BASE_ADDRESS(cmd);
+	if (base == 0) {
+		smblib_err(the_chg, "base address is invalid. cmd:[%d]\n", cmd);
+		return -EINVAL;
+	}
+
+	addr = base + smblib_reg_tbl[cmd].offset;
+	rc = regmap_update_bits(the_chg->regmap, addr, mask, val);
+
+	smblib_dbg(the_chg, PR_REGISTER, "write reg:[0x%04X] mask:[0x%02X] val:[0x%02X]\n",
+				addr, mask, val);
+
+	return rc;
+}
+EXPORT_SYMBOL_GPL(oem_smblib_reg_mask_write);
 
 int smblib_get_iio_channel(struct smb_charger *chg, const char *propname,
 					struct iio_channel **chan)
@@ -1449,11 +1578,13 @@ int smblib_set_icl_current(struct smb_charger *chg, int icl_ua)
 		 * current limit is 500mA or below for better accuracy; in case
 		 * of error, proceed to use USB high-current mode.
 		 */
+#if 0
 		if (icl_ua <= USBIN_500MA) {
 			rc = set_sdp_current(chg, icl_ua);
 			if (rc >= 0)
 				goto unsuspend;
 		}
+#endif
 
 		rc = smblib_set_charge_param(chg, &chg->param.usb_icl, icl_ua);
 		if (rc < 0) {
@@ -1470,7 +1601,9 @@ set_mode:
 		goto out;
 	}
 
+#if 0
 unsuspend:
+#endif
 	/* unsuspend after configuring current and override */
 	rc = smblib_set_usb_suspend(chg, false);
 	if (rc < 0) {
@@ -3276,13 +3409,16 @@ int smblib_get_prop_usb_online(struct smb_charger *chg,
 			       union power_supply_propval *val)
 {
 	int rc = 0;
+#if 0
 	u8 stat;
+#endif
 
 	if (get_client_vote_locked(chg->usb_icl_votable, USER_VOTER) == 0) {
 		val->intval = false;
 		return rc;
 	}
 
+#if 0
 	if (is_client_vote_enabled_locked(chg->usb_icl_votable,
 					CHG_TERMINATION_VOTER)) {
 		rc = smblib_get_prop_usb_present(chg, val);
@@ -3300,6 +3436,10 @@ int smblib_get_prop_usb_online(struct smb_charger *chg,
 
 	val->intval = (stat & USE_USBIN_BIT) &&
 		      (stat & VALID_INPUT_POWER_SOURCE_STS_BIT);
+#else
+	rc = smblib_get_prop_usb_present(chg, val);
+#endif
+
 	return rc;
 }
 
@@ -3537,6 +3677,24 @@ unlock:
 
 	return ret;
 }
+
+int smblib_get_prop_voltage_usbin(struct smb_charger *chg,
+				    union power_supply_propval *val)
+{
+	int rc = 0;
+
+	mutex_lock(&chg->adc_lock);
+
+	rc = smblib_read_usbin_voltage_chan(chg, val);
+	if (rc < 0) {
+		smblib_err(chg, "Failed to read USBIN over vadc, rc=%d\n", rc);
+	}
+
+	mutex_unlock(&chg->adc_lock);
+
+	return rc;
+}
+
 
 int smblib_get_prop_vph_voltage_now(struct smb_charger *chg,
 				    union power_supply_propval *val)
@@ -5497,6 +5655,10 @@ void smblib_usb_plugin_hard_reset_locked(struct smb_charger *chg)
 		/* Remove FCC_STEPPER 1.5A init vote to allow FCC ramp up */
 		if (chg->fcc_stepper_enable)
 			vote(chg->fcc_votable, FCC_STEPPER_VOTER, false, 0);
+
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+		custom_det_charge_req(CUSTOM_DET_CHARGE_APSD, true);
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 	} else {
 		if (chg->wa_flags & BOOST_BACK_WA) {
 			data = chg->irq_info[SWITCHER_POWER_OK_IRQ].irq_data;
@@ -5515,6 +5677,10 @@ void smblib_usb_plugin_hard_reset_locked(struct smb_charger *chg)
 		if (chg->fcc_stepper_enable)
 			vote(chg->fcc_votable, FCC_STEPPER_VOTER,
 							true, 1500000);
+
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+		custom_det_charge_req(CUSTOM_DET_CHARGE_APSD, false);
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 	}
 
 	power_supply_changed(chg->usb_psy);
@@ -5562,6 +5728,10 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 		vote(chg->awake_votable, PL_DELAY_VOTER, true, 0);
 		schedule_delayed_work(&chg->pl_enable_work,
 					msecs_to_jiffies(PL_DELAY_MS));
+
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+		custom_det_charge_req(CUSTOM_DET_CHARGE_APSD, true);
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 	} else {
 		/* Disable SW Thermal Regulation */
 		rc = smblib_set_sw_thermal_regulation(chg, false);
@@ -5619,6 +5789,10 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 			smblib_err(chg, "Couldn't disable DPDM rc=%d\n", rc);
 
 		smblib_update_usb_type(chg);
+
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+		custom_det_charge_req(CUSTOM_DET_CHARGE_APSD, false);
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 	}
 
 	if (chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB)
@@ -5837,6 +6011,11 @@ static void smblib_handle_apsd_done(struct smb_charger *chg, bool rising)
 		break;
 	}
 
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+	CUSTOM_DET_RECLOG("apsd-done: %s detected\n",
+	       apsd_result->name);
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
+
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: apsd-done rising; %s detected\n",
 		   apsd_result->name);
 }
@@ -5922,6 +6101,10 @@ enum alarmtimer_restart smblib_lpd_recheck_timer(struct alarm *alarm,
 		}
 		chg->moisture_present = false;
 		power_supply_changed(chg->usb_psy);
+
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+		CUSTOM_DET_RECLOG("Type-c moisture recheck\n");
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 	} else {
 		rc = smblib_masked_write(chg, TYPE_C_INTERRUPT_EN_CFG_2_REG,
 					TYPEC_WATER_DETECTION_INT_EN_BIT,
@@ -5982,6 +6165,10 @@ static bool smblib_src_lpd(struct smb_charger *chg)
 		alarm_start_relative(&chg->lpd_recheck_timer,
 						ms_to_ktime(60000));
 		power_supply_changed(chg->usb_psy);
+
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+		CUSTOM_DET_RECLOG("Type-c moisture detected\n");
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 	} else {
 		chg->lpd_reason = LPD_NONE;
 		chg->typec_mode = smblib_get_prop_typec_mode(chg);
@@ -6483,6 +6670,11 @@ irqreturn_t typec_state_change_irq_handler(int irq, void *data)
 
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: cc-state-change; Type-C %s detected\n",
 				smblib_typec_mode_name[chg->typec_mode]);
+
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+	CUSTOM_DET_RECLOG("Type-c %s detected\n",
+	       smblib_typec_mode_name[chg->typec_mode]);
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 
 	power_supply_changed(chg->usb_psy);
 
@@ -7872,6 +8064,9 @@ static void smblib_lpd_ra_open_work(struct work_struct *work)
 		chg->moisture_present =  true;
 		vote(chg->usb_icl_votable, LPD_VOTER, true, 0);
 
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+		CUSTOM_DET_RECLOG("Type-c moisture detected\n");
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 	} else {
 		/* Floating cable, disable water detection irq temporarily */
 		rc = smblib_masked_write(chg, TYPE_C_INTERRUPT_EN_CFG_2_REG,
@@ -8259,6 +8454,8 @@ int smblib_init(struct smb_charger *chg)
 		smblib_err(chg, "Unsupported mode %d\n", chg->mode);
 		return -EINVAL;
 	}
+
+	the_chg = chg;
 
 	return rc;
 }

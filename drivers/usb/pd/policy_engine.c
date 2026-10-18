@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
@@ -20,7 +23,13 @@
 #include <linux/extcon-provider.h>
 #include <linux/usb/typec.h>
 #include <linux/usb/usbpd.h>
+#include <linux/mfd/oem_charger.h>	
+
 #include "usbpd.h"
+
+#define FEATURE_PDO_CHANGE
+#define FEATURE_NOT_LOWER_THE_VOLTAGE
+#define OEM_USBPD_RECLOG(fmt, ...)		printk("REC@REC@0 [CUSTOM USBPD]" fmt, ##__VA_ARGS__)
 
 enum usbpd_state {
 	PE_UNKNOWN,
@@ -398,6 +407,13 @@ struct usbpd {
 	u16			src_cap_id;
 	u8			selected_pdo;
 	u8			requested_pdo;
+#ifdef FEATURE_PDO_CHANGE
+	u32						received_pdos_raw[PD_MAX_DATA_OBJ];
+	int						pdo_pos_raw2avail[PD_MAX_DATA_OBJ];
+	int						pdo_pos_avail2raw[PD_MAX_DATA_OBJ];
+	bool					pdo_dumped;
+	struct power_supply		*oem_battery_psy;
+#endif /* FEATURE_PDO_CHANGE */
 	u32			rdo;	/* can be either source or sink */
 	int			current_voltage;	/* uV */
 	int			requested_voltage;	/* uV */
@@ -509,6 +525,106 @@ static void handle_state_prs_snk_src_source_on(struct usbpd *pd,
 	struct rx_msg *rx_msg);
 
 static const struct usbpd_state_handler state_handlers[];
+
+#ifdef FEATURE_PDO_CHANGE
+static int usbpd_pdo_available_check(u32 *rx_data, u32 *available_pdo, int *avail2raw, int *raw2avail)
+{
+	int i;
+	u32 pdo;
+	u32 pdo_data[PD_MAX_DATA_OBJ];
+	bool valid[PD_MAX_DATA_OBJ];
+	int pos = 0;
+
+	memset(pdo_data, 0, sizeof(pdo_data));
+
+	for (i = 0; i < PD_MAX_DATA_OBJ; i++) {
+		pdo = rx_data[i];
+		if (PD_SRC_PDO_TYPE(pdo) != PD_SRC_PDO_TYPE_FIXED) {
+			printk("usbpd:PDO type not supported %d:%08x\n", i, pdo);
+			continue;
+		}
+		/* convert to uV */
+		pdo_data[i] = PD_SRC_PDO_FIXED_VOLTAGE(pdo)*50*1000;
+	}
+	oem_chg_pdo_available_check(&pdo_data[0], &valid[0], PD_MAX_DATA_OBJ);
+
+	for (i = 0; i < PD_MAX_DATA_OBJ; i++) {
+		if (valid[i]) {
+			available_pdo[pos] = rx_data[i];
+			avail2raw[pos] = i;
+			raw2avail[i] = pos;
+			pos++;
+		}
+	}
+	return 0;
+}
+
+static void usbpd_pdo_dump(struct usbpd *pd)
+{
+	union power_supply_propval val;
+	int ret;
+
+	ret = power_supply_get_property(pd->oem_battery_psy, POWER_SUPPLY_PROP_HEALTH, &val);
+	if (ret)
+		return;
+
+	switch (val.intval) {
+	case POWER_SUPPLY_HEALTH_UNSPEC_FAILURE:
+	case POWER_SUPPLY_HEALTH_USB_HOT:
+	case POWER_SUPPLY_HEALTH_OVER_SUPPLY_VOLTAGE:
+	case POWER_SUPPLY_HEALTH_OVERVOLTAGE:
+	case POWER_SUPPLY_HEALTH_OTHER_ERROR:
+	case POWER_SUPPLY_HEALTH_HOLDER_ERROR:
+	case POWER_SUPPLY_HEALTH_COLD:
+		if (!pd->pdo_dumped) {
+			OEM_USBPD_RECLOG("Available PDOs:%08x %08x %08x %08x %08x %08x %08x\n",
+					pd->received_pdos[0],
+					pd->received_pdos[1],
+					pd->received_pdos[2],
+					pd->received_pdos[3],
+					pd->received_pdos[4],
+					pd->received_pdos[5],
+					pd->received_pdos[6]
+					);
+			OEM_USBPD_RECLOG("Original PDOs:%08x %08x %08x %08x %08x %08x %08x\n",
+					pd->received_pdos_raw[0],
+					pd->received_pdos_raw[1],
+					pd->received_pdos_raw[2],
+					pd->received_pdos_raw[3],
+					pd->received_pdos_raw[4],
+					pd->received_pdos_raw[5],
+					pd->received_pdos_raw[6]
+					);
+			OEM_USBPD_RECLOG("RDO:%08x\n", pd->rdo);
+			pd->pdo_dumped = true;
+		}
+		break;
+	default:
+		break;
+	}
+}
+#endif /* FEATURE_PDO_CHANGE */
+#ifdef FEATURE_NOT_LOWER_THE_VOLTAGE
+static int pd_check_pdo_if_can_change(struct usbpd *pd, int pdo_pos, int uv)
+{
+	u8 type;
+	u32 pdo = pd->received_pdos[pdo_pos - 1];
+
+	type = PD_SRC_PDO_TYPE(pdo);
+	if (type == PD_SRC_PDO_TYPE_FIXED) {
+		if (pd->current_voltage > PD_SRC_PDO_FIXED_VOLTAGE(pdo) * 50 * 1000) {
+			usbpd_err(&pd->dev, "FIXED:not lower the voltage\n");
+			return -ENOTSUPP;
+		}
+	} else if (type == PD_SRC_PDO_TYPE_AUGMENTED) {
+		if (pd->current_voltage > uv) {
+			usbpd_err(&pd->dev, "AUGMENTED:not lower the voltage\n");
+			return -ENOTSUPP;
+		}
+	}
+	return 0;
+}
+#endif /* FEATURE_NOT_LOWER_THE_VOLTAGE */
 
 enum plug_orientation usbpd_get_plug_orientation(struct usbpd *pd)
 {
@@ -849,6 +965,14 @@ static int pd_select_pdo(struct usbpd *pd, int pdo_pos, int uv, int ua)
 	bool mismatch = false;
 	u8 type;
 	u32 pdo = pd->received_pdos[pdo_pos - 1];
+#ifdef FEATURE_PDO_CHANGE
+	int pdo_pos_raw = pd->pdo_pos_avail2raw[pdo_pos - 1] + 1;
+
+	if (pdo_pos_raw == 0xFF) {
+		usbpd_err(&pd->dev, "pdo_pos value error(%d)\n", pdo_pos);
+		return -EINVAL;
+	}
+#endif /* FEATURE_PDO_CHANGE */
 
 	type = PD_SRC_PDO_TYPE(pdo);
 	if (type == PD_SRC_PDO_TYPE_FIXED) {
@@ -865,8 +989,13 @@ static int pd_select_pdo(struct usbpd *pd, int pdo_pos, int uv, int ua)
 
 		pd->requested_voltage =
 			PD_SRC_PDO_FIXED_VOLTAGE(pdo) * 50 * 1000;
+#ifdef FEATURE_PDO_CHANGE
+		pd->rdo = PD_RDO_FIXED(pdo_pos_raw, 0, mismatch, 1, 1, curr / 10,
+				max_current / 10);
+#else
 		pd->rdo = PD_RDO_FIXED(pdo_pos, 0, mismatch, 1, 1, curr / 10,
 				max_current / 10);
+#endif /* FEATURE_PDO_CHANGE */
 	} else if (type == PD_SRC_PDO_TYPE_AUGMENTED) {
 		if ((uv / 100000) > PD_APDO_MAX_VOLT(pdo) ||
 			(uv / 100000) < PD_APDO_MIN_VOLT(pdo) ||
@@ -878,8 +1007,13 @@ static int pd_select_pdo(struct usbpd *pd, int pdo_pos, int uv, int ua)
 
 		curr = ua / 1000;
 		pd->requested_voltage = uv;
+#ifdef FEATURE_PDO_CHANGE
+		pd->rdo = PD_RDO_AUGMENTED(pdo_pos_raw, mismatch, 1, 1,
+				uv / 20000, ua / 50000);
+#else
 		pd->rdo = PD_RDO_AUGMENTED(pdo_pos, mismatch, 1, 1,
 				uv / 20000, ua / 50000);
+#endif /* FEATURE_PDO_CHANGE */
 	} else {
 		usbpd_err(&pd->dev, "Only Fixed or Programmable PDOs supported\n");
 		return -ENOTSUPP;
@@ -902,6 +1036,13 @@ static int pd_eval_src_caps(struct usbpd *pd)
 		usbpd_err(&pd->dev, "First src_cap invalid %08x\n", first_pdo);
 		return -EINVAL;
 	}
+#ifdef FEATURE_PDO_CHANGE
+	if (PD_SRC_PDO_FIXED_VOLTAGE(first_pdo) < 100 ||
+		PD_SRC_PDO_FIXED_VOLTAGE(first_pdo) > 110) {
+		usbpd_err(&pd->dev, "First first_pdo invalid!\n");
+		return -EINVAL;
+	}
+#endif /* FEATURE_PDO_CHANGE */
 
 	pd->peer_usb_comm = PD_SRC_PDO_FIXED_USB_COMM(first_pdo);
 	pd->peer_pr_swap = PD_SRC_PDO_FIXED_PR_SWAP(first_pdo);
@@ -2670,10 +2811,15 @@ static void handle_state_snk_startup(struct usbpd *pd, struct rx_msg *rx_msg)
 static void handle_state_snk_discovery(struct usbpd *pd, struct rx_msg *rx_msg)
 {
 	if (!rx_msg) {
-		if (pd->vbus_present)
+		
+		if (pd->vbus_present) {
 			usbpd_set_state(pd,
 					PE_SNK_WAIT_FOR_CAPABILITIES);
-
+		} else {
+			usbpd_err(&pd->dev, "[FJ]Hard reset did not turn on VBUS!\n");
+			usbpd_set_state(pd, PE_ERROR_RECOVERY);
+		}
+		
 		/*
 		 * Handle disconnection in the middle of PR_Swap.
 		 * Since in psy_changed() if pd->in_pr_swap is true
@@ -2722,11 +2868,20 @@ static void handle_state_snk_wait_for_capabilities(struct usbpd *pd,
 				&val);
 
 		/* save the PDOs so userspace can further evaluate */
+#ifdef FEATURE_PDO_CHANGE
+		usbpd_pdo_available_check((u32 *)rx_msg->payload, pd->received_pdos, pd->pdo_pos_avail2raw, pd->pdo_pos_raw2avail);
+		memset(&pd->received_pdos_raw, 0,
+				sizeof(pd->received_pdos_raw));
+		memcpy(&pd->received_pdos_raw, rx_msg->payload,
+				min_t(size_t, rx_msg->data_len,
+					sizeof(pd->received_pdos_raw)));
+#else
 		memset(&pd->received_pdos, 0,
 				sizeof(pd->received_pdos));
 		memcpy(&pd->received_pdos, rx_msg->payload,
 				min_t(size_t, rx_msg->data_len,
 					sizeof(pd->received_pdos)));
+#endif /* FEATURE_PDO_CHANGE */
 		/* if pps is disabled clear all the received pdos */
 		if (pd->pps_disabled) {
 			for (i = 0; i < ARRAY_SIZE(pd->received_pdos); i++)
@@ -2764,6 +2919,7 @@ static void enter_state_snk_evaluate_capability(struct usbpd *pd)
 	ret = pd_eval_src_caps(pd);
 	if (ret < 0) {
 		usbpd_err(&pd->dev, "Invalid src_caps received. Skipping request\n");
+		oem_chg_notify_error(OEM_CHG_ERROR_PDO_ERROR_DETECT);	
 		return;
 	}
 
@@ -2974,11 +3130,20 @@ static bool handle_data_snk_ready(struct usbpd *pd, struct rx_msg *rx_msg)
 	switch (PD_MSG_HDR_TYPE(rx_msg->hdr)) {
 	case MSG_SOURCE_CAPABILITIES:
 		/* save the PDOs so userspace can further evaluate */
+#ifdef FEATURE_PDO_CHANGE
+		usbpd_pdo_available_check((u32 *)rx_msg->payload, pd->received_pdos, pd->pdo_pos_avail2raw, pd->pdo_pos_raw2avail);
+		memset(&pd->received_pdos_raw, 0,
+				sizeof(pd->received_pdos_raw));
+		memcpy(&pd->received_pdos_raw, rx_msg->payload,
+				min_t(size_t, rx_msg->data_len,
+					sizeof(pd->received_pdos_raw)));
+#else
 		memset(&pd->received_pdos, 0,
 				sizeof(pd->received_pdos));
 		memcpy(&pd->received_pdos, rx_msg->payload,
 				min_t(size_t, rx_msg->data_len,
 					sizeof(pd->received_pdos)));
+#endif /* FEATURE_PDO_CHANGE */
 		/* if pps is disabled clear all the received pdos */
 		if (pd->pps_disabled) {
 			for (i = 0; i < ARRAY_SIZE(pd->received_pdos); i++)
@@ -3502,6 +3667,12 @@ static void handle_disconnect(struct usbpd *pd)
 	pd->selected_pdo = pd->requested_pdo = 0;
 	pd->peer_usb_comm = pd->peer_pr_swap = pd->peer_dr_swap = false;
 	memset(&pd->received_pdos, 0, sizeof(pd->received_pdos));
+#ifdef FEATURE_PDO_CHANGE
+		pd->pdo_dumped = false;
+		memset(&pd->received_pdos_raw, 0, sizeof(pd->received_pdos_raw));
+		memset(&pd->pdo_pos_avail2raw, 0xFF, sizeof(pd->pdo_pos_avail2raw));
+		memset(&pd->pdo_pos_raw2avail, 0xFF, sizeof(pd->pdo_pos_raw2avail));
+#endif /* FEATURE_PDO_CHANGE */
 	rx_msg_cleanup(pd);
 
 	power_supply_set_property(pd->usb_psy,
@@ -3553,6 +3724,7 @@ static void handle_disconnect(struct usbpd *pd)
 	kobject_uevent(&pd->dev.kobj, KOBJ_CHANGE);
 	typec_unregister_partner(pd->partner);
 	pd->partner = NULL;
+	oem_chg_notify_error(OEM_CHG_ERROR_PDO_ERROR_NONE);	
 
 	if (pd->has_dp) {
 		pd->has_dp = false;
@@ -3794,6 +3966,11 @@ static int psy_changed(struct notifier_block *nb, unsigned long evt, void *ptr)
 	union power_supply_propval val;
 	enum power_supply_typec_mode typec_mode;
 	int ret;
+
+#ifdef FEATURE_PDO_CHANGE
+	if (ptr == pd->oem_battery_psy && evt == PSY_EVENT_PROP_CHANGED)
+		usbpd_pdo_dump(pd);
+#endif /* FEATURE_PDO_CHANGE */
 
 	if (ptr != pd->usb_psy || evt != PSY_EVENT_PROP_CHANGED)
 		return 0;
@@ -4306,6 +4483,12 @@ static ssize_t select_pdo_store(struct device *dev,
 		goto out;
 	}
 
+#ifdef FEATURE_NOT_LOWER_THE_VOLTAGE
+	ret = pd_check_pdo_if_can_change(pd, pdo, uv);
+	if (ret)
+		goto out;
+#endif /* FEATURE_NOT_LOWER_THE_VOLTAGE */
+
 	ret = pd_select_pdo(pd, pdo, uv, ua);
 	if (ret)
 		goto out;
@@ -4359,7 +4542,11 @@ static ssize_t rdo_h_show(struct device *dev, struct device_attribute *attr,
 {
 	struct usbpd *pd = dev_get_drvdata(dev);
 	int pos = PD_RDO_OBJ_POS(pd->rdo);
+#ifdef FEATURE_PDO_CHANGE
+	int type = PD_SRC_PDO_TYPE(pd->received_pdos_raw[pos - 1]);
+#else
 	int type = PD_SRC_PDO_TYPE(pd->received_pdos[pos - 1]);
+#endif /* FEATURE_PDO_CHANGE */
 	int len;
 
 	len = scnprintf(buf, PAGE_SIZE, "Request Data Object\n"
@@ -4750,6 +4937,21 @@ struct usbpd *usbpd_create(struct device *parent)
 		goto destroy_wq;
 	}
 
+	if (oem_chg_initialized() == false) {
+		usbpd_err(&pd->dev, "oem_chg is not initialized, deferring probe\n");
+		ret = -EPROBE_DEFER;
+		goto put_usb_psy;
+	}
+
+#ifdef FEATURE_PDO_CHANGE
+	pd->oem_battery_psy = power_supply_get_by_name("oem-batt");
+	if (!pd->oem_battery_psy) {
+		usbpd_dbg(&pd->dev, "Could not get oem_battery_psy power_supply, deferring probe\n");
+		ret = -EPROBE_DEFER;
+		goto put_usb_psy;
+	}
+#endif /* FEATURE_PDO_CHANGE */
+
 	if (!pd->bat_psy)
 		pd->bat_psy = power_supply_get_by_name("battery");
 	if (pd->bat_psy)
@@ -4888,6 +5090,8 @@ struct usbpd *usbpd_create(struct device *parent)
 del_inst:
 	list_del(&pd->instance);
 put_psy:
+	power_supply_put(pd->oem_battery_psy);
+put_usb_psy:
 	power_supply_put(pd->usb_psy);
 destroy_wq:
 	destroy_workqueue(pd->wq);

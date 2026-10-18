@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved. */
 
@@ -16,8 +19,12 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/spmi.h>
 
+#include <linux/switch_logout.h>
+
 static bool is_registered;
 static DEFINE_IDA(ctrl_ida);
+
+static int gpiodump_suspend_in = 0;
 
 static void spmi_dev_release(struct device *dev)
 {
@@ -38,6 +45,35 @@ static void spmi_ctrl_release(struct device *dev)
 
 static const struct device_type spmi_ctrl_type = {
 	.release	= spmi_ctrl_release,
+};
+
+static int spmi_runtime_suspend(struct device *dev)
+{
+	if (gpiodump_suspend_in == 0) {
+		printk("spmi_device_pm_suspend\n");
+		switch_after_suspend_gpio_dump();
+		gpiodump_suspend_in = 1;
+	}
+	return 0;
+}
+
+static int spmi_runtime_resume(struct device *dev)
+{
+	if (gpiodump_suspend_in == 1) {
+		printk("spmi_device_pm_resume\n");
+	}
+	gpiodump_suspend_in = 0;
+	return 0;
+}
+
+static const struct dev_pm_ops spmi_pm_ops = {
+		.suspend = spmi_runtime_suspend,
+		.resume = spmi_runtime_resume,
+		SET_RUNTIME_PM_OPS(
+				pm_generic_suspend,
+				pm_generic_resume,
+				NULL
+				)
 };
 
 static int spmi_device_match(struct device *dev, struct device_driver *drv)
@@ -371,6 +407,7 @@ static int spmi_drv_uevent(struct device *dev, struct kobj_uevent_env *env)
 static struct bus_type spmi_bus_type = {
 	.name		= "spmi",
 	.match		= spmi_device_match,
+	.pm			= &spmi_pm_ops,
 	.probe		= spmi_drv_probe,
 	.remove		= spmi_drv_remove,
 	.uevent		= spmi_drv_uevent,

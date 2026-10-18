@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
@@ -82,6 +85,7 @@ enum print_reason {
 #define ICL_CHANGE_VOTER		"ICL_CHANGE_VOTER"
 #define OVERHEAT_LIMIT_VOTER		"OVERHEAT_LIMIT_VOTER"
 #define TYPEC_SWAP_VOTER		"TYPEC_SWAP_VOTER"
+#define OEM_CHG_VOTER			"OEM_CHG_VOTER"
 
 #define BOOST_BACK_STORM_COUNT	3
 #define WEAK_CHG_STORM_COUNT	8
@@ -404,6 +408,7 @@ struct smb_charger {
 	struct power_supply		*usb_psy;
 	struct power_supply		*dc_psy;
 	struct power_supply		*bms_psy;
+	struct power_supply		*oem_batt_psy;
 	struct power_supply		*usb_main_psy;
 	struct power_supply		*usb_port_psy;
 	struct power_supply		*wls_psy;
@@ -841,4 +846,7 @@ int smblib_get_qc3_main_icl_offset(struct smb_charger *chg, int *offset_ua);
 
 int smblib_init(struct smb_charger *chg);
 int smblib_deinit(struct smb_charger *chg);
+
+int smblib_get_prop_voltage_usbin(struct smb_charger *chg,
+				union power_supply_propval *val);
 #endif /* __SMB5_CHARGER_H */

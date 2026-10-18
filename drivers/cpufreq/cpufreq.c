@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/drivers/cpufreq/cpufreq.c
  *
@@ -2654,3 +2657,75 @@ static int __init cpufreq_core_init(void)
 }
 module_param(off, int, 0444);
 core_initcall(cpufreq_core_init);
+
+int cpufreq_set_limit(cpumask_t cpu_mask, unsigned int max_freq, unsigned int min_freq)
+{
+	unsigned long flags;
+	struct cpufreq_policy *policy;
+	struct cpufreq_policy new_policy;
+	unsigned int cpu;
+	int ret, err = 0;
+	cpumask_t related = { CPU_BITS_NONE };
+
+	if (cpufreq_disabled() || !cpufreq_driver) {
+		pr_err("%s: driver not initialized\n", __FUNCTION__);
+		return -EINVAL;
+	}
+
+	cpumask_and(&cpu_mask, &cpu_mask, cpu_possible_mask);
+	if (min_freq > max_freq)
+		min_freq = max_freq;
+
+	pr_debug("%s(msk:%lx, max:%u, min:%u)\n", __FUNCTION__, cpumask_bits(&cpu_mask)[0], max_freq, min_freq);
+
+	cpus_read_lock();
+
+	for_each_cpu(cpu, &cpu_mask) {
+		if (cpumask_test_cpu(cpu, &related)) {
+			continue;
+		}
+
+		read_lock_irqsave(&cpufreq_driver_lock, flags);
+		policy = per_cpu(cpufreq_cpu_data, cpu);
+		if (policy)
+			kobject_get(&policy->kobj);
+		read_unlock_irqrestore(&cpufreq_driver_lock, flags);
+
+		if (policy) {
+			down_write(&policy->rwsem);
+
+			memcpy(&new_policy, policy, sizeof(*policy));
+			new_policy.min = min_freq;
+			new_policy.max = max_freq;
+			ret = cpufreq_driver->verify(&new_policy);
+			if (ret)
+				pr_err("cpufreq: Frequency verification failed\n");
+			policy->user_policy.min = new_policy.min;
+			policy->user_policy.max = new_policy.max;
+			pr_debug("  cpu%u set policy (max:%u, min:%u)\n", cpu, new_policy.max, new_policy.min);
+			if (policy_is_inactive(policy)) {
+				pr_debug("  cpu%u pending\n", cpu);
+			} else {
+				ret = cpufreq_set_policy(policy, &new_policy);
+				if (ret) {
+					pr_err("cpufreq: cpu%u set policy error %d\n", cpu, ret);
+					err = ret;
+				}
+			}
+
+			up_write(&policy->rwsem);
+
+			cpumask_or(&related, &related, policy->related_cpus);
+			pr_debug("  related_cpu:%lx\n", cpumask_bits(policy->related_cpus)[0]);
+
+			kobject_put(&policy->kobj);
+		} else {
+			pr_debug("  cpu%u undefined policy\n", cpu);
+		}
+	}
+
+	cpus_read_unlock();
+	pr_debug("%s() done %d\n", __FUNCTION__, err);
+
+	return err;
+}

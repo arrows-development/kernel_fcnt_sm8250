@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * Copyright (c) 2013, Sony Mobile Communications AB.
  * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
@@ -566,13 +569,32 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 	seq_puts(s, "\n");
 }
 
+static unsigned access_denied_gpio_tbl[] = {
+	28, 29, 30, 31,
+	40, 41, 42, 43,
+	52, 53, 54, 55
+};
+
+static bool msm_gpio_access_valid(unsigned gpio_val)
+{
+	unsigned i;
+
+	for (i = 0; i < ARRAY_SIZE(access_denied_gpio_tbl); i++) {
+		if (gpio_val == access_denied_gpio_tbl[i])
+			return false;
+	}
+
+	return true;
+}
+
 static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
 	unsigned gpio = chip->base;
 	unsigned i;
 
 	for (i = 0; i < chip->ngpio; i++, gpio++)
-		msm_gpio_dbg_show_one(s, NULL, chip, i, gpio);
+		if (msm_gpio_access_valid(i))
+			msm_gpio_dbg_show_one(s, NULL, chip, i, gpio);
 }
 
 #else

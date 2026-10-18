@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * kernel/power/main.c - PM subsystem core functionality.
@@ -593,6 +596,8 @@ static suspend_state_t decode_state(const char *buf, size_t n)
 	return PM_SUSPEND_ON;
 }
 
+extern int pcpc_set_scene(const char *scene); 
+
 static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 			   const char *buf, size_t n)
 {
@@ -614,6 +619,7 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 			state = mem_sleep_current;
 
 		error = pm_suspend(state);
+		pcpc_set_scene("BOOST_LCDON"); 
 	} else if (state == PM_SUSPEND_MAX) {
 		error = hibernate();
 	} else {

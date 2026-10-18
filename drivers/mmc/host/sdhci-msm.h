@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
@@ -82,6 +85,7 @@ struct sdhci_msm_reg_data {
 	/* voltage level to be set */
 	u32 low_vol_level;
 	u32 high_vol_level;
+	u32 middle_vol_level; 
 	/* Load values for low power and high power mode */
 	u32 lpm_uA;
 	u32 hpm_uA;
@@ -201,6 +205,8 @@ struct sdhci_msm_pltfm_data {
 	struct sdhci_msm_pin_data *pin_data;
 	struct sdhci_pinctrl_data *pctrl_data;
 	int status_gpio; /* card detection GPIO that is configured as IRQ */
+	int host_type;                 
+	void * phost;                  
 	struct sdhci_msm_bus_voting_data *voting_data;
 	u32 *sup_clk_table;
 	unsigned char sup_clk_cnt;
@@ -323,6 +329,7 @@ struct sdhci_msm_host {
 	bool debug_mode_enabled;
 	bool reg_store;
 	bool vbias_skip_wa;
+	struct timespec vdd_off_start_ts;
 	struct reset_control *core_reset;
 	u32 minor;
 };

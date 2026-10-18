@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * drivers/base/power/main.c - Where the driver meets power management.
  *
@@ -34,6 +37,8 @@
 #include <linux/cpuidle.h>
 #include <linux/timer.h>
 #include <linux/wakeup_reason.h>
+
+#include <linux/switch_logout.h>
 
 #include "../base.h"
 #include "power.h"
@@ -475,17 +480,30 @@ static int dpm_run_callback(pm_callback_t cb, struct device *dev,
 {
 	ktime_t calltime;
 	int error;
+#ifdef CALLBACK_TIME_WARNING_REPORT
+	unsigned long stamp;
+#endif /* CALLBACK_TIME_WARNING_REPORT */
 
 	if (!cb)
 		return 0;
 
 	calltime = initcall_debug_start(dev, cb);
+#ifdef CALLBACK_TIME_WARNING_REPORT
+	stamp = jiffies + WARNING_REPORT_TIME;
+#endif /* CALLBACK_TIME_WARNING_REPORT */
 
 	pm_dev_dbg(dev, state, info);
 	trace_device_pm_callback_start(dev, info, state.event);
 	error = cb(dev);
 	trace_device_pm_callback_end(dev, error);
 	suspend_report_result(cb, error);
+#ifdef CALLBACK_TIME_WARNING_REPORT
+	if (time_after(jiffies, stamp)) {
+		printk(KERN_WARNING "%s %s%s returned %d after %dms\n",
+			   dev_name(dev), info, pm_verb(state.event), error,
+			   jiffies_to_msecs(jiffies - stamp + WARNING_REPORT_TIME));
+	}
+#endif /* CALLBACK_TIME_WARNING_REPORT */
 
 	initcall_debug_report(dev, calltime, cb, error);
 
@@ -1704,12 +1722,28 @@ static int legacy_suspend(struct device *dev, pm_message_t state,
 {
 	int error;
 	ktime_t calltime;
+#ifdef CALLBACK_TIME_WARNING_REPORT
+	unsigned long stamp;
+#endif /* CALLBACK_TIME_WARNING_REPORT */
 
 	calltime = initcall_debug_start(dev, cb);
+
+#ifdef CALLBACK_TIME_WARNING_REPORT
+	stamp = jiffies + WARNING_REPORT_TIME;
+#endif /* CALLBACK_TIME_WARNING_REPORT */
 
 	trace_device_pm_callback_start(dev, info, state.event);
 	error = cb(dev, state);
 	trace_device_pm_callback_end(dev, error);
+
+#ifdef CALLBACK_TIME_WARNING_REPORT
+	if (time_after(jiffies, stamp)) {
+		printk(KERN_WARNING "%s %s returned %d after %dms\n",
+		      dev_name(dev), pm_verb(state.event), error,
+		      jiffies_to_msecs(jiffies - stamp + WARNING_REPORT_TIME));
+	}
+#endif /* CALLBACK_TIME_WARNING_REPORT */
+
 	suspend_report_result(cb, error);
 
 	initcall_debug_report(dev, calltime, cb, error);

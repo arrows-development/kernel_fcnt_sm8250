@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
@@ -39,6 +42,7 @@
 #include <linux/extcon.h>
 #include <linux/reset.h>
 #include <linux/clk/qcom.h>
+#include <linux/mfd/oem_charger.h>	
 
 #include "power.h"
 #include "core.h"
@@ -3360,7 +3364,8 @@ static void check_for_sdp_connection(struct work_struct *w)
 	/* floating D+/D- lines detected */
 	if (dwc->gadget.state < USB_STATE_DEFAULT &&
 		dwc3_gadget_get_link_state(dwc) != DWC3_LINK_STATE_CMPLY) {
-		mdwc->vbus_active = 0;
+		dev_info(mdwc->dev, "[OEM]floating D+/D- lines detected\n");
+/*		mdwc->vbus_active = 0; */
 		dbg_event(0xFF, "Q RW SPD CHK", mdwc->vbus_active);
 		queue_work(mdwc->dwc3_wq, &mdwc->resume_work);
 	}
@@ -4569,6 +4574,13 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		set_bit(WAIT_FOR_LPM, &mdwc->inputs);
 	}
 
+	if (on)
+		dwc->vbus_draw = OEM_CHG_USB_CURRENT;
+	else
+		dwc->vbus_draw = OEM_CHG_OFF_CURRENT;
+
+	dwc3_msm_gadget_vbus_draw(mdwc, dwc->vbus_draw);
+
 	pm_runtime_put_sync(mdwc->dev);
 	dbg_event(0xFF, "StopGdgt psync",
 		atomic_read(&mdwc->dev->power.usage_count));
@@ -4640,6 +4652,7 @@ static int dwc3_msm_gadget_vbus_draw(struct dwc3_msm *mdwc, unsigned int mA)
 
 	psy_type = get_psy_type(mdwc);
 	if (psy_type == POWER_SUPPLY_TYPE_USB_FLOAT) {
+#if 0
 		/*
 		 * Do not notify charger driver for any current and
 		 * bail out if suspend happened with float cable
@@ -4652,11 +4665,26 @@ static int dwc3_msm_gadget_vbus_draw(struct dwc3_msm *mdwc, unsigned int mA)
 			pval.intval = -ETIMEDOUT;
 		else
 			pval.intval = 1000 * mA;
+#else
+		dev_info(mdwc->dev, "[OEM][FLOAT]Avail curr from USB = %u\n", mA);
+		/* Set max current limit in uA */
+		pval.intval = 1000 * mA;
+#endif
 		goto set_prop;
 	}
 
+#if 0
 	if (mdwc->max_power == mA || psy_type != POWER_SUPPLY_TYPE_USB)
 		return 0;
+#else
+	if (mdwc->max_power == mA || psy_type != POWER_SUPPLY_TYPE_USB) {
+		if (psy_type != POWER_SUPPLY_TYPE_USB) {
+			dev_info(mdwc->dev, "[OEM]Avail curr from USB = %u\n", mA);
+			mdwc->max_power = mA;
+		}
+		return 0;
+	}
+#endif
 
 	/* Set max current limit in uA */
 	pval.intval = 1000 * mA;

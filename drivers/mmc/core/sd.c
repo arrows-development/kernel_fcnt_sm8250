@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/drivers/mmc/core/sd.c
  *
@@ -94,6 +97,23 @@ void mmc_decode_cid(struct mmc_card *card)
 	card->cid.month			= UNSTUFF_BITS(resp, 8, 4);
 
 	card->cid.year += 2000; /* SD cards year offset */
+}
+
+void mmc_sd_down_speed_mode(struct mmc_host *host)
+{
+	struct mmc_card *card = host->card;
+
+	if (mmc_card_uhs(card) || (MMC_POWER_OFF==host->ios.power_mode && mmc_host_uhs(host))) {
+		if (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR104) {
+			card->change_speed_uhs = card->sw_caps.sd3_bus_mode & ~SD_MODE_UHS_SDR104;
+			pr_info("%s: Speed Down SDR104->DDR50\n", mmc_hostname(card->host));
+		} else if (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_DDR50) {
+			card->change_speed_uhs = card->sw_caps.sd3_bus_mode & ~(SD_MODE_UHS_DDR50 | SD_MODE_UHS_SDR50);
+			pr_info("%s: Speed Down DDR50->SDR25\n", mmc_hostname(card->host));
+		}
+	}
+
+	return;
 }
 
 /*
@@ -220,8 +240,15 @@ static int mmc_decode_scr(struct mmc_card *card)
 	else
 		card->erased_byte = 0x0;
 
-	if (scr->sda_spec3)
+	if (scr->sda_spec3) {
 		scr->cmds = UNSTUFF_BITS(resp, 32, 2);
+
+		if (!(card->change_speed_uhs & SD_MODE_UHS_SDR104) &&
+			(scr->cmds & SD_SCR_CMD23_SUPPORT)) {
+			FJ_SD_REC_LOG("%s: SpeedDown Disable CMD23 manfid:%d oemid:%d\n", mmc_hostname(card->host), card->cid.manfid, card->cid.oemid);
+			scr->cmds &= ~SD_SCR_CMD23_SUPPORT;
+		}
+	}
 
 	/* SD Spec says: any SD Card shall set at least bits 0 and 2 */
 	if (!(scr->bus_widths & SD_SCR_BUS_WIDTH_1) ||
@@ -338,6 +365,11 @@ static int mmc_read_switch(struct mmc_card *card)
 		/* Driver Strengths supported by the card */
 		card->sw_caps.sd3_drv_type = status[9];
 		card->sw_caps.sd3_curr_limit = status[7] | status[6] << 8;
+
+		if (card->change_speed_uhs != 0xFFFFFFFF) {
+			card->sw_caps.sd3_bus_mode &= card->change_speed_uhs;
+			pr_info("%s: speed change sd3_bus_mode:0x%x\n", mmc_hostname(card->host), card->sw_caps.sd3_bus_mode);
+		}
 	}
 
 out:
@@ -1046,6 +1078,8 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 	u32 rocr = 0;
 	bool v18_fixup_failed = false;
 
+	bool uhs_speed_down = false;
+
 	WARN_ON(!host->claimed);
 retry:
 	err = mmc_sd_get_cid(host, ocr, cid, &rocr);
@@ -1057,7 +1091,7 @@ retry:
 			return -ENOENT;
 
 		card = oldcard;
-	} else {
+	} else if (!uhs_speed_down) {
 		/*
 		 * Allocate card structure.
 		 */
@@ -1068,7 +1102,10 @@ retry:
 		card->ocr = ocr;
 		card->type = MMC_TYPE_SD;
 		memcpy(card->raw_cid, cid, sizeof(card->raw_cid));
+		card->change_speed_uhs = 0xFFFFFFFF; 
 	}
+
+	uhs_speed_down = false;
 
 	/*
 	 * Call the optional HC's init_card function to handle quirks.
@@ -1086,7 +1123,7 @@ retry:
 		host->card = card;
 	}
 
-	if (!oldcard) {
+	if ((!oldcard) || (card->change_speed_uhs != 0xFFFFFFFF)) {
 		err = mmc_sd_get_csd(host, card);
 		if (err)
 			goto free_card;
@@ -1110,7 +1147,7 @@ retry:
 			goto free_card;
 	}
 
-	err = mmc_sd_setup_card(host, card, oldcard != NULL);
+	err = mmc_sd_setup_card(host, card, ((oldcard != NULL) && (card->change_speed_uhs == 0xFFFFFFFF)));
 	if (err)
 		goto free_card;
 
@@ -1134,10 +1171,14 @@ retry:
 		if (mmc_sd_card_using_v18(card)) {
 			if (mmc_host_set_uhs_voltage(host) ||
 			    mmc_sd_init_uhs_card(card)) {
-				v18_fixup_failed = true;
-				mmc_power_cycle(host, ocr);
-				if (!oldcard)
-					mmc_remove_card(card);
+				mmc_power_off(host);
+				mmc_sd_down_speed_mode(host);
+				mmc_delay(1);
+				mmc_power_up(host, ocr);
+				if (!(card->change_speed_uhs &
+					(SD_MODE_UHS_SDR50 | SD_MODE_UHS_SDR104 | SD_MODE_UHS_DDR50)))
+					v18_fixup_failed = true;
+				uhs_speed_down = true;
 				goto retry;
 			}
 			goto done;
@@ -1147,8 +1188,19 @@ retry:
 	/* Initialization sequence for UHS-I cards */
 	if (rocr & SD_ROCR_S18A && mmc_host_uhs(host)) {
 		err = mmc_sd_init_uhs_card(card);
-		if (err)
-			goto free_card;
+		if (err) {
+			if (!(card->sw_caps.sd3_bus_mode &
+				(SD_MODE_UHS_SDR50 | SD_MODE_UHS_SDR104 | SD_MODE_UHS_DDR50))) {
+				goto free_card;
+			}
+
+			mmc_power_off(host);
+			mmc_sd_down_speed_mode(host);
+			mmc_delay(1);
+			mmc_power_up(host, ocr);
+			uhs_speed_down = true;
+			goto retry;
+		}
 	} else {
 		/*
 		 * Attempt to change to high-speed (if supported)
@@ -1185,9 +1237,26 @@ retry:
 		goto free_card;
 	}
 done:
+	err = mmc_set_blocklen(card, 512);
+	if (err)
+		goto free_card;
+
 	card->clk_scaling_highest = mmc_sd_get_max_clock(card);
 	card->clk_scaling_lowest = host->f_min;
+	card->change_speed_uhs = 0xFFFFFFFF;	
 
+	
+	if (!oldcard) {
+		FJ_SD_REC_LOG("SD info: OCR:%08x\n",
+					rocr);
+		FJ_SD_REC_LOG("SD info: CID:%08x%08x%08x%08x\n",
+					card->raw_cid[0], card->raw_cid[1], card->raw_cid[2], card->raw_cid[3]);
+		FJ_SD_REC_LOG("SD info: CSD:%08x%08x%08x%08x\n",
+					card->raw_csd[0], card->raw_csd[1], card->raw_csd[2], card->raw_csd[3]);
+		FJ_SD_REC_LOG("SD info: SCR:%08x%08x\n",
+					card->raw_scr[0], card->raw_scr[1]);
+	}
+	
 	return 0;
 
 free_card:
@@ -1334,6 +1403,8 @@ static int _mmc_sd_resume(struct mmc_host *host)
 		mmc_card_set_removed(host->card);
 		mmc_detect_change(host, msecs_to_jiffies(200));
 	} else if (err) {
+		mmc_card_set_removed(host->card);
+		mmc_detect_change(host, msecs_to_jiffies(200));
 		goto out;
 	}
 	mmc_card_clr_suspended(host->card);
@@ -1366,6 +1437,8 @@ static int _mmc_sd_deferred_resume(struct mmc_host *host)
 		mmc_card_set_removed(host->card);
 		mmc_detect_change(host, msecs_to_jiffies(200));
 	} else if (err) {
+		mmc_card_set_removed(host->card);
+		mmc_detect_change(host, msecs_to_jiffies(200));
 		goto out;
 	}
 	mmc_card_clr_suspended(host->card);
@@ -1480,6 +1553,7 @@ static const struct mmc_bus_ops mmc_sd_ops = {
 	.hw_reset = mmc_sd_hw_reset,
 	.change_bus_speed = mmc_sd_change_bus_speed,
 	.change_bus_speed_deferred = mmc_sd_change_bus_speed_deferred,
+	.down_speed_mode = mmc_sd_down_speed_mode,	
 };
 
 /*

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
+ * (C) 2021 FCNT LIMITED
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
  */
@@ -713,7 +714,7 @@ static int _disp_tz_log_stats_legacy(void)
 
 static int _disp_log_stats(struct tzdbg_log_t *log,
 			struct tzdbg_log_pos_t *log_start, uint32_t log_len,
-			size_t count, uint32_t buf_idx)
+			size_t count, uint32_t buf_idx, bool is_sec_tzlog)
 {
 	uint32_t wrap_start;
 	uint32_t wrap_end;
@@ -746,7 +747,7 @@ static int _disp_log_stats(struct tzdbg_log_t *log,
 
 	pr_debug("diag_buf wrap = %u, offset = %u\n",
 		log->log_pos.wrap, log->log_pos.offset);
-	while (log_start->offset == log->log_pos.offset) {
+	while (log_start->offset == log->log_pos.offset && !is_sec_tzlog) {
 		/*
 		 * No data in ring buffer,
 		 * so we'll hang around until something happens
@@ -787,7 +788,7 @@ static int _disp_log_stats(struct tzdbg_log_t *log,
 static int _disp_log_stats_v2(struct tzdbg_log_v2_t *log,
 			      struct tzdbg_log_pos_v2_t *log_start,
 			      uint32_t log_len, size_t count,
-			      uint32_t buf_idx)
+			      uint32_t buf_idx, bool is_sec_tzlog)
 {
 	uint32_t wrap_start;
 	uint32_t wrap_end;
@@ -820,7 +821,7 @@ static int _disp_log_stats_v2(struct tzdbg_log_v2_t *log,
 	pr_debug("diag_buf wrap = %u, offset = %u\n",
 		log->log_pos.wrap, log->log_pos.offset);
 
-	while (log_start->offset == log->log_pos.offset) {
+	while (log_start->offset == log->log_pos.offset && !is_sec_tzlog) {
 		/*
 		 * No data in ring buffer,
 		 * so we'll hang around until something happens
@@ -1020,6 +1021,10 @@ static int _disp_tz_log_stats(size_t count)
 	static struct tzdbg_log_pos_t log_start = {0};
 	struct tzdbg_log_v2_t *log_v2_ptr;
 	struct tzdbg_log_t *log_ptr;
+	static struct tzdbg_log_pos_v2_t sec_log_start_v2 = {0};
+	static struct tzdbg_log_pos_t sec_log_start = {0};
+	bool is_sec_tzlog = strncmp(current->comm, "sec_tzlog", sizeof("sec_tzlog")) == 0 &&
+			    current->cred->uid.val == 1000;
 
 	log_ptr = (struct tzdbg_log_t *)((unsigned char *)tzdbg.diag_buf +
 		   tzdbg.diag_buf->ring_off -
@@ -1030,11 +1035,15 @@ static int _disp_tz_log_stats(size_t count)
 		      offsetof(struct tzdbg_log_v2_t, log_buf));
 
 	if (!tzdbg.is_enlarged_buf)
-		return _disp_log_stats(log_ptr, &log_start,
-				tzdbg.diag_buf->ring_len, count, TZDBG_LOG);
+		return _disp_log_stats(log_ptr,
+				is_sec_tzlog ? &sec_log_start : &log_start,
+				tzdbg.diag_buf->ring_len, count, TZDBG_LOG,
+				is_sec_tzlog);
 
-	return _disp_log_stats_v2(log_v2_ptr, &log_start_v2,
-			tzdbg.diag_buf->ring_len, count, TZDBG_LOG);
+	return _disp_log_stats_v2(log_v2_ptr,
+			is_sec_tzlog ? &sec_log_start_v2 : &log_start_v2,
+			tzdbg.diag_buf->ring_len, count, TZDBG_LOG,
+			is_sec_tzlog);
 }
 
 static int _disp_hyp_log_stats(size_t count)
@@ -1055,15 +1064,25 @@ static int _disp_qsee_log_stats(size_t count)
 {
 	static struct tzdbg_log_pos_t log_start = {0};
 	static struct tzdbg_log_pos_v2_t log_start_v2 = {0};
+	static struct tzdbg_log_pos_t sec_log_start = {0};
+	static struct tzdbg_log_pos_v2_t sec_log_start_v2 = {0};
+	bool is_sec_tzlog = strncmp(current->comm, "sec_tzlog", sizeof("sec_tzlog")) == 0 &&
+			    current->cred->uid.val == 1000;
+
+	if (!is_sec_tzlog)
+		printk(KERN_INFO "%s:%d: qsee_log debug. process name=%s, uid=%d, pid=%d\n",
+		       __FUNCTION__, __LINE__, current->comm, current->cred->uid.val, current->pid);
 
 	if (!tzdbg.is_enlarged_buf)
-		return _disp_log_stats(g_qsee_log, &log_start,
+		return _disp_log_stats(g_qsee_log,
+			is_sec_tzlog ? &sec_log_start : &log_start,
 			QSEE_LOG_BUF_SIZE - sizeof(struct tzdbg_log_pos_t),
-			count, TZDBG_QSEE_LOG);
+			count, TZDBG_QSEE_LOG, is_sec_tzlog);
 
-	return _disp_log_stats_v2(g_qsee_log_v2, &log_start_v2,
+	return _disp_log_stats_v2(g_qsee_log_v2,
+		is_sec_tzlog ? &sec_log_start_v2 : &log_start_v2,
 		QSEE_LOG_BUF_SIZE_V2 - sizeof(struct tzdbg_log_pos_v2_t),
-		count, TZDBG_QSEE_LOG);
+		count, TZDBG_QSEE_LOG, is_sec_tzlog);
 }
 
 static int _disp_hyp_general_stats(size_t count)

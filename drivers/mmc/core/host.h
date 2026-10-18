@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/drivers/mmc/core/host.h
  *
@@ -12,6 +15,8 @@
 #define _MMC_CORE_HOST_H
 
 #include <linux/mmc/host.h>
+
+#define FJ_SD_REC_LOG(x, y...)	printk("REC@REC@0 [CUSTOM SD]" x, ## y);
 
 int mmc_register_host_class(void);
 void mmc_unregister_host_class(void);

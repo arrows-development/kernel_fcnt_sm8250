@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/drivers/thermal/cpu_cooling.c
  *
@@ -35,6 +38,12 @@
 #include <linux/of_device.h>
 
 #include <trace/events/thermal.h>
+#include <linux/pm_qos.h>
+#include <linux/topology.h>
+
+#define LITTLE_CLUSTER_MASK     (*(topology_core_cpumask(0)))
+#define BIG_CLUSTER_MASK        (*(topology_core_cpumask(4)))
+#define PRIME_CLUSTER_MASK      (*(topology_core_cpumask(7)))
 
 /*
  * Cooling state <-> CPUFreq frequency
@@ -104,6 +113,13 @@ struct cpufreq_cooling_device {
 
 static DEFINE_MUTEX(cooling_list_lock);
 static LIST_HEAD(cpufreq_cdev_list);
+
+static struct pm_qos_request pm_qos_thermal_lit_max_freq;
+static struct pm_qos_request pm_qos_thermal_lit_min_freq;
+static struct pm_qos_request pm_qos_thermal_big_max_freq;
+static struct pm_qos_request pm_qos_thermal_big_min_freq;
+static struct pm_qos_request pm_qos_thermal_pri_max_freq;
+static struct pm_qos_request pm_qos_thermal_pri_min_freq;
 
 /* Below code defines functions to be used for cpufreq as cooling device */
 
@@ -363,6 +379,9 @@ static int cpufreq_set_min_state(struct thermal_cooling_device *cdev,
 	struct cpufreq_cooling_device *cpufreq_cdev = cdev->devdata;
 	unsigned int cpu = cpufreq_cdev->policy->cpu;
 	unsigned int floor_freq;
+	struct cpufreq_policy *policy;
+	struct cpufreq_cooling_device *cpufreq_dev;
+	bool need_update;
 
 	if (state > cpufreq_cdev->max_level)
 		return -EINVAL;
@@ -385,6 +404,37 @@ static int cpufreq_set_min_state(struct thermal_cooling_device *cdev,
 	else
 		cpufreq_update_policy(cpu);
 
+	policy = cpufreq_cpu_get(cpu);
+	if (policy) {
+		need_update = true;
+		mutex_lock(&cooling_list_lock);
+		list_for_each_entry(cpufreq_dev, &cpufreq_cdev_list, node) {
+			if (cpufreq_cdev == cpufreq_dev)
+				continue;
+			if (!cpumask_intersects(cpufreq_dev->policy->related_cpus,
+						policy->related_cpus))
+				continue;
+			if (cpufreq_dev->floor_freq > floor_freq)
+				need_update = false;
+		}
+		mutex_unlock(&cooling_list_lock);
+		if (need_update) {
+			pr_debug("id:%d cpu:%d freq:%d cpumsk:%*pbl\n",
+			    cpufreq_cdev->id, cpu, floor_freq, cpumask_pr_args(cpufreq_cdev->policy->related_cpus));
+			if (cpumask_test_cpu(cpumask_first(policy->related_cpus), &LITTLE_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_thermal_lit_min_freq))
+					pm_qos_update_request(&pm_qos_thermal_lit_min_freq, floor_freq);
+			} else if (cpumask_test_cpu(cpumask_first(policy->related_cpus), &BIG_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_thermal_big_min_freq))
+					pm_qos_update_request(&pm_qos_thermal_big_min_freq, floor_freq);
+			} else if (cpumask_test_cpu(cpumask_first(policy->related_cpus), &PRIME_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_thermal_pri_min_freq))
+					pm_qos_update_request(&pm_qos_thermal_pri_min_freq, floor_freq);
+			}
+		}
+		cpufreq_cpu_put(policy);
+	}
+
 	return 0;
 }
 
@@ -403,6 +453,10 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 {
 	struct cpufreq_cooling_device *cpufreq_cdev = cdev->devdata;
 	unsigned int clip_freq;
+	unsigned int cpu = cpufreq_cdev->policy->cpu;
+	struct cpufreq_policy *policy;
+	struct cpufreq_cooling_device *cpufreq_dev;
+	bool need_update;
 
 	/* Request state should be less than max_level */
 	if (WARN_ON(state > cpufreq_cdev->max_level))
@@ -426,6 +480,37 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 							clip_freq);
 	else
 		cpufreq_update_policy(cpufreq_cdev->policy->cpu);
+
+	policy = cpufreq_cpu_get(cpu);
+	if (policy) {
+		need_update = true;
+		mutex_lock(&cooling_list_lock);
+		list_for_each_entry(cpufreq_dev, &cpufreq_cdev_list, node) {
+			if (cpufreq_cdev == cpufreq_dev)
+				continue;
+			if (!cpumask_intersects(cpufreq_dev->policy->related_cpus,
+						policy->related_cpus))
+				continue;
+			if (cpufreq_dev->clipped_freq < clip_freq)
+				need_update = false;
+		}
+		mutex_unlock(&cooling_list_lock);
+		if (need_update) {
+			pr_debug("id:%d cpu:%d freq:%d msk:%*pbl\n",
+			    cpufreq_cdev->id, cpu, clip_freq, cpumask_pr_args(cpufreq_cdev->policy->related_cpus));
+			if (cpumask_test_cpu(cpumask_first(policy->related_cpus), &LITTLE_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_thermal_lit_max_freq))
+					pm_qos_update_request(&pm_qos_thermal_lit_max_freq, clip_freq);
+			} else if (cpumask_test_cpu(cpumask_first(policy->related_cpus), &BIG_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_thermal_big_max_freq))
+					pm_qos_update_request(&pm_qos_thermal_big_max_freq, clip_freq);
+			} else if (cpumask_test_cpu(cpumask_first(policy->related_cpus), &PRIME_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_thermal_pri_max_freq))
+					pm_qos_update_request(&pm_qos_thermal_pri_max_freq, clip_freq);
+			}
+		}
+		cpufreq_cpu_put(policy);
+	}
 
 	return 0;
 }
@@ -705,6 +790,23 @@ __cpufreq_cooling_register(struct device_node *np,
 	if (first && !cpufreq_cdev->plat_ops)
 		cpufreq_register_notifier(&thermal_cpufreq_notifier_block,
 					  CPUFREQ_POLICY_NOTIFIER);
+
+	if (cpumask_test_cpu(cpumask_first(policy->related_cpus), &LITTLE_CLUSTER_MASK)) {
+		if (!pm_qos_request_active(&pm_qos_thermal_lit_max_freq))
+			pm_qos_add_request(&pm_qos_thermal_lit_max_freq, PM_QOS_LIT_MAXF, INT_MAX);
+		if (!pm_qos_request_active(&pm_qos_thermal_lit_min_freq))
+			pm_qos_add_request(&pm_qos_thermal_lit_min_freq, PM_QOS_LIT_MINF, 0);
+	} else if (cpumask_test_cpu(cpumask_first(policy->related_cpus), &BIG_CLUSTER_MASK)) {
+		if (!pm_qos_request_active(&pm_qos_thermal_big_max_freq))
+			pm_qos_add_request(&pm_qos_thermal_big_max_freq, PM_QOS_BIG_MAXF, INT_MAX);
+		if (!pm_qos_request_active(&pm_qos_thermal_big_min_freq))
+			pm_qos_add_request(&pm_qos_thermal_big_min_freq, PM_QOS_BIG_MINF, 0);
+	} else if (cpumask_test_cpu(cpumask_first(policy->related_cpus), &PRIME_CLUSTER_MASK)) {
+		if (!pm_qos_request_active(&pm_qos_thermal_pri_max_freq))
+			pm_qos_add_request(&pm_qos_thermal_pri_max_freq, PM_QOS_PRIM_MAXF, INT_MAX);
+		if (!pm_qos_request_active(&pm_qos_thermal_pri_min_freq))
+			pm_qos_add_request(&pm_qos_thermal_pri_min_freq, PM_QOS_PRIM_MINF, 0);
+	}
 
 	return cdev;
 

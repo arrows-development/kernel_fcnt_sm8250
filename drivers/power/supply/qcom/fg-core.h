@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
@@ -497,6 +500,9 @@ struct fg_dev {
 	struct work_struct	esr_filter_work;
 	struct alarm		esr_filter_alarm;
 	ktime_t			last_delta_temp_time;
+	int			cycle_chg_lvl;		
+	int			cc_cv_threshold_mv;
+	int			last_msoc_raw;
 };
 
 /* Debugfs data structures are below */

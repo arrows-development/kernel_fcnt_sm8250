@@ -4,6 +4,7 @@
 #include <linux/firmware.h>
 #include <linux/module.h>
 #include <linux/soc/qcom/qmi.h>
+#include <linux/nonvolatile_common.h>
 
 #include "bus.h"
 #include "debug.h"
@@ -12,6 +13,7 @@
 
 #define WLFW_SERVICE_INS_ID_V01		1
 #define WLFW_CLIENT_ID			0x4b4e454c
+#define APNV_BDF_ID                     49270
 #define BDF_FILE_NAME_PREFIX		"bdwlan"
 #define ELF_BDF_FILE_NAME		"bdwlan.elf"
 #define ELF_BDF_FILE_NAME_GF		"bdwlang.elf"
@@ -532,9 +534,32 @@ static int cnss_get_bdf_file_name(struct cnss_plat_data *plat_priv,
 					 ELF_BDF_FILE_NAME_GF_PREFIX "%02x",
 					 plat_priv->board_info.board_id);
 			else
-				snprintf(filename_tmp, filename_len,
-					 ELF_BDF_FILE_NAME_PREFIX "%02x",
-					 plat_priv->board_info.board_id);
+// 2020-01-14 TS_Connectivity REQSYS-WLAN-02501-SELECT-BDF MOD-S
+//				snprintf(filename_tmp, filename_len,
+//					 ELF_BDF_FILE_NAME_PREFIX "%02x",
+//					 plat_priv->board_info.board_id);
+			{
+				int ret2 = 0;
+				unsigned char temp = 0;
+
+				ret2 = get_nonvolatile((void*)&temp, APNV_BDF_ID, 1);
+				if (((temp & 0xc0) == 0x40 ) && ret2 == 1) {
+					snprintf(filename_tmp, filename_len,
+						ELF_BDF_FILE_NAME_PREFIX "ll");
+				}
+				else if(((temp & 0xc0) == 0x80) && ret2 == 1) {
+					snprintf(filename_tmp, filename_len,
+						ELF_BDF_FILE_NAME_PREFIX "uu");
+				} else {
+					if (ret2 < 0 || (temp & 0xc0) != 0) {
+						cnss_pr_err("warning: get_nonvolatile is invalid\n");
+					}
+					snprintf(filename_tmp, filename_len,
+						ELF_BDF_FILE_NAME_PREFIX "%02x",
+						plat_priv->board_info.board_id);
+				}
+			}
+// 2020-01-14 TS_Connectivity REQSYS-WLAN-02501-SELECT-BDF MOD-E
 		} else {
 			snprintf(filename_tmp, filename_len,
 				 BDF_FILE_NAME_PREFIX "%02x.e%02x",

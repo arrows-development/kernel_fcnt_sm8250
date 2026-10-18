@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  *  Sysfs interface for the universal power supply monitor class
  *
@@ -47,6 +50,8 @@ static const char * const power_supply_type_text[] = {
 	"USB_HVDCP", "USB_HVDCP_3", "USB_HVDCP_3P5", "Wireless", "USB_FLOAT",
 	"BMS", "Parallel", "Main", "USB_C_UFP", "USB_C_DFP",
 	"Charge_Pump",
+	"oem-holder", "oem-usb", "oem-ac" ,"oem-chg",
+	"oem-batt",
 };
 
 static const char * const power_supply_usb_type_text[] = {
@@ -66,6 +71,9 @@ static const char * const power_supply_health_text[] = {
 	"Unknown", "Good", "Overheat", "Dead", "Over voltage",
 	"Unspecified failure", "Cold", "Watchdog timer expire",
 	"Safety timer expire", "Over current", "Warm", "Cool", "Hot"
+	,"Under Supply voltage", "Over Supply voltage"
+	,"Holder Error", "Temp Usb Error", "Temp Usb Error"
+	,"Other Error"
 };
 
 static const char * const power_supply_technology_text[] = {
@@ -469,6 +477,16 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(voltage_step),
 	POWER_SUPPLY_ATTR(apsd_rerun),
 	POWER_SUPPLY_ATTR(apsd_timeout),
+	POWER_SUPPLY_ATTR(chg_enable),
+	POWER_SUPPLY_ATTR(chg_mode),
+	POWER_SUPPLY_ATTR(chg_state),
+	POWER_SUPPLY_ATTR(initialize),
+	POWER_SUPPLY_ATTR(age),
+	POWER_SUPPLY_ATTR(cycle_chg),
+	POWER_SUPPLY_ATTR(longevity_chg_mode),
+	POWER_SUPPLY_ATTR(msoc_raw),
+	POWER_SUPPLY_ATTR(oem_chg_ctrl_soc),
+	POWER_SUPPLY_ATTR(voltage_usbin),
 	/* Charge pump properties */
 	POWER_SUPPLY_ATTR(cp_status1),
 	POWER_SUPPLY_ATTR(cp_status2),

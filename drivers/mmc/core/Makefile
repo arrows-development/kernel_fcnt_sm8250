@@ -1,3 +1,6 @@
+#/*----------------------------------------------------------------------------*/
+#// (C) 2021 FCNT LIMITED
+#/*----------------------------------------------------------------------------*/
 # SPDX-License-Identifier: GPL-2.0
 #
 # Makefile for the kernel mmc core.
@@ -18,4 +21,5 @@ obj-$(CONFIG_MMC_BLOCK)		+= mmc_block.o
 mmc_block-objs			:= block.o queue.o
 obj-$(CONFIG_MMC_TEST)		+= mmc_test.o
 obj-$(CONFIG_SDIO_UART)		+= sdio_uart.o
+mmc_core-y += cmdlog.o
 mmc_core-$(CONFIG_MMC_CRYPTO)	+= crypto.o

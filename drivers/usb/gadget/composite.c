@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0+
 /*
  * composite.c - infrastructure for Composite USB Gadgets
@@ -2537,7 +2540,7 @@ void composite_suspend(struct usb_gadget *gadget)
 	    cdev->config->bmAttributes & USB_CONFIG_ATT_SELFPOWER)
 		usb_gadget_set_selfpowered(gadget);
 
-	usb_gadget_vbus_draw(gadget, 2);
+/*	usb_gadget_vbus_draw(gadget, 2); */
 }
 
 void composite_resume(struct usb_gadget *gadget)
@@ -2589,8 +2592,7 @@ void composite_resume(struct usb_gadget *gadget)
 			usb_gadget_clear_selfpowered(gadget);
 		else
 			usb_gadget_set_selfpowered(gadget);
-
-		usb_gadget_vbus_draw(gadget, maxpower);
+/*		usb_gadget_vbus_draw(gadget, maxpower); */
 	}
 
 	spin_unlock_irqrestore(&cdev->lock, flags);

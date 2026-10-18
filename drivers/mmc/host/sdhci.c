@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+/* (C) 2021 FCNT LIMITED                   */
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/drivers/mmc/host/sdhci.c - Secure Digital Host Controller Interface driver
  *
@@ -39,6 +42,7 @@
 #include <trace/events/mmc.h>
 
 #include "sdhci.h"
+#include "../core/cmdlog.h" 
 
 #define DRIVER_NAME "sdhci"
 
@@ -151,6 +155,9 @@ void sdhci_dumpregs(struct sdhci_host *host)
 #endif
 	sdhci_dump_state(host);
 	SDHCI_DUMP("============================================\n");
+
+	mmc_cmdlog_dump(host->mmc); 
+
 	/* crash the system upon setting this debugfs. */
 	if (host->mmc->crash_on_err)
 		BUG_ON(1);
@@ -813,6 +820,7 @@ static unsigned int sdhci_target_timeout(struct sdhci_host *host,
 		target_timeout = cmd->busy_timeout * 1000;
 	} else {
 		target_timeout = DIV_ROUND_UP(data->timeout_ns, 1000);
+		target_timeout *= (1 << mmc_get_timeout_exponent(data, host->mmc->card));
 		if (host->clock && data->timeout_clks) {
 			unsigned long long val;
 
@@ -2415,6 +2423,16 @@ static void sdhci_exit_dbg_mode(struct mmc_host *mmc)
 	if (host->ops && host->ops->exit_dbg_mode)
 		host->ops->exit_dbg_mode(host);
 }
+static int sdhci_get_host_type(struct mmc_host *mmc)
+{
+	struct sdhci_host *host = mmc_priv(mmc);
+	int ret = 0;
+
+	if (host->ops && host->ops->get_host_type)
+		ret = host->ops->get_host_type(host);
+
+	return ret;
+}
 
 static void sdhci_enable_sdio_irq_nolock(struct sdhci_host *host, int enable)
 {
@@ -2965,6 +2983,7 @@ static const struct mmc_host_ops sdhci_ops = {
 	.set_ios	= sdhci_set_ios,
 	.get_cd		= sdhci_get_cd,
 	.get_ro		= sdhci_get_ro,
+	.get_host_type	= sdhci_get_host_type, 
 	.hw_reset	= sdhci_hw_reset,
 	.enter_dbg_mode = sdhci_enter_dbg_mode,
 	.exit_dbg_mode = sdhci_exit_dbg_mode,

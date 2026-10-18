@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * Copyright (c) 2010-2021, The Linux Foundation. All rights reserved.
  * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -3445,3 +3448,93 @@ int kgsl_pwrctrl_set_default_gpu_pwrlevel(struct kgsl_device *device)
 	/* Request adjusted DCVS level */
 	return kgsl_clk_set_rate(device, pwr->active_pwrlevel);
 }
+
+int kgsl_pwrctrl_set_freq(unsigned int def_freq,
+				unsigned int max_freq,
+				unsigned int min_freq)
+{
+	int min_level, max_level;
+	struct kgsl_device *device = kgsl_get_device(KGSL_DEVICE_3D0);
+	struct kgsl_pwrctrl *pwr;
+	struct kgsl_pwrscale *pwrscale;
+	int def_level;
+
+	if (IS_ERR_OR_NULL(device))
+		return 0;
+
+	pwr = &device->pwrctrl;
+	pwrscale = &device->pwrscale;
+
+	mutex_lock(&device->mutex);
+	max_level = _get_nearest_pwrlevel(pwr, max_freq);
+	if (max_level < 0) {
+		/* Find the neighboring frequencies */
+		for (max_level = pwr->num_pwrlevels - 1; max_level > 0; max_level--) {
+			if (pwr->pwrlevels[max_level - 1].gpu_freq > max_freq) {
+				break;
+			}
+		}
+	}
+	if (max_level > pwr->num_pwrlevels - 2)
+		max_level = pwr->num_pwrlevels - 2;
+	min_level = _get_nearest_pwrlevel(pwr, min_freq);
+	if (min_level < 0) {
+		/* Find the neighboring frequencies */
+		for (min_level = 0; min_level < pwr->num_pwrlevels - 1; min_level++) {
+			if (pwr->pwrlevels[min_level + 1].gpu_freq <= min_freq) {
+				break;
+			}
+		}
+	}
+	if (min_level > pwr->num_pwrlevels - 2)
+		min_level = pwr->num_pwrlevels - 2;
+
+	def_level = _get_nearest_pwrlevel(pwr, def_freq);
+	if (def_level < 0) {
+		/* Find the neighboring frequencies */
+		for (def_level = 0; def_level < pwr->num_pwrlevels - 1; def_level++) {
+			if (pwr->pwrlevels[def_level + 1].gpu_freq <= def_freq) {
+				break;
+			}
+		}
+	}
+	if (def_level > pwr->num_pwrlevels - 2)
+		def_level = pwr->num_pwrlevels - 2;
+	/* disable thermal cycle */
+	if (pwr->thermal_cycle != CYCLE_DISABLE) {
+		pwr->thermal_cycle = CYCLE_DISABLE;
+		del_timer_sync(&pwr->thermal_timer);
+		dev_info(device->dev, "disabled thermal cycle\n");
+	}
+
+	/* set */
+	dev_info(device->dev, "def req=%d, set=%d def_lv=%u->%d\n",
+			def_freq, pwr->pwrlevels[def_level].gpu_freq,
+			pwr->default_pwrlevel, def_level);
+	pwr->default_pwrlevel = def_level;
+	pwrscale->gpu_profile.profile.initial_freq
+			= pwr->pwrlevels[def_level].gpu_freq;
+	dev_info(device->dev, "max req=%d, set=%d, min req=%d, set=%d\n",
+			max_freq, pwr->pwrlevels[max_level].gpu_freq, min_freq, pwr->pwrlevels[min_level].gpu_freq);
+	/* You can't set a minimum power level lower than the maximum */
+	if (min_level < max_level)
+		min_level = max_level;
+	dev_info(device->dev, "max=%u->%d, min=%u->%d\n", pwr->max_pwrlevel, max_level, pwr->min_pwrlevel, min_level);
+	dev_info(device->dev, "   now=%u, thr=%d, num=%u\n", pwr->active_pwrlevel, pwr->thermal_pwrlevel, pwr->num_pwrlevels - 1);
+	pwr->max_pwrlevel = max_level;
+	pwr->min_pwrlevel = min_level;
+	/* refrect the settings */
+	max_level = max_t(int, pwr->thermal_pwrlevel, pwr->max_pwrlevel);
+	min_level = max_t(int, pwr->thermal_pwrlevel, pwr->min_pwrlevel);
+	if (max_level > pwr->active_pwrlevel) {
+		dev_info(device->dev, "kgsl_pwrctrl_pwrlevel_change(%d)\n", max_level);
+		kgsl_pwrctrl_pwrlevel_change(device, max_level);
+	} else if (min_level < pwr->active_pwrlevel) {
+		dev_info(device->dev, "kgsl_pwrctrl_pwrlevel_change(%d)\n", min_level);
+		kgsl_pwrctrl_pwrlevel_change(device, min_level);
+	}
+	mutex_unlock(&device->mutex);
+
+	return 0;
+}
+EXPORT_SYMBOL(kgsl_pwrctrl_set_freq);

@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
@@ -23,6 +26,9 @@
 #include "smb5-reg.h"
 #include "smb5-lib.h"
 #include "schgm-flash.h"
+
+#include "custom_det.h" 
+#include "oem_charger_local.h"
 
 static struct smb_params smb5_pmi632_params = {
 	.fcc			= {
@@ -227,7 +233,11 @@ struct smb5 {
 	struct smb_dt_props	dt;
 };
 
+#if 0
 static int __debug_mask;
+#else
+static int __debug_mask = PR_INTERRUPT | PR_MISC | PR_OTG;
+#endif
 
 static ssize_t pd_disabled_show(struct device *dev, struct device_attribute
 				*attr, char *buf)
@@ -891,6 +901,10 @@ static enum power_supply_property smb5_usb_props[] = {
 	POWER_SUPPLY_PROP_APSD_TIMEOUT,
 	POWER_SUPPLY_PROP_CHARGER_STATUS,
 	POWER_SUPPLY_PROP_INPUT_VOLTAGE_SETTLED,
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX,
+	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT,
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 };
 
 static int smb5_usb_get_prop(struct power_supply *psy,
@@ -1059,6 +1073,17 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 				val->intval = (buff[1] << 8 | buff[0]) * 1038;
 		}
 		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_USBIN:
+		rc = smblib_get_prop_voltage_usbin(chg, val);
+		break;
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX:
+		val->intval = custom_det_get_charge_control_limit_max();
+		break;
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
+		val->intval = custom_det_get_charge_control_limit();
+		break;
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 	default:
 		pr_err("get prop %d is not supported in usb\n", psp);
 		rc = -EINVAL;
@@ -1153,6 +1178,11 @@ static int smb5_usb_set_prop(struct power_supply *psy,
 		chg->apsd_ext_timeout = false;
 		smblib_rerun_apsd(chg);
 		break;
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
+		custom_det_set_charge_control_limit(val->intval);
+		break;
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 	default:
 		pr_err("set prop %d is not supported\n", psp);
 		rc = -EINVAL;
@@ -1728,8 +1758,10 @@ static enum power_supply_property smb5_batt_props[] = {
 	POWER_SUPPLY_PROP_DIE_HEALTH,
 	POWER_SUPPLY_PROP_RERUN_AICL,
 	POWER_SUPPLY_PROP_DP_DM,
+#ifndef FEATURE_CUSTOM_DET_DRIVER
 	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX,
 	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT,
+#endif
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_RECHARGE_SOC,
@@ -1748,12 +1780,26 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 	struct smb_charger *chg = power_supply_get_drvdata(psy);
 	int rc = 0;
 
+	if (!chg->oem_batt_psy)
+		chg->oem_batt_psy = power_supply_get_by_name(OEM_BATTERY_PSY_NAME);
+
 	switch (psp) {
 	case POWER_SUPPLY_PROP_STATUS:
-		rc = smblib_get_prop_batt_status(chg, val);
+		if (chg->oem_batt_psy) {
+			rc = power_supply_get_property(chg->oem_batt_psy,
+					POWER_SUPPLY_PROP_STATUS, val);
+		} else {
+			rc = smblib_get_prop_batt_status(chg, val);
+		}
+
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
-		rc = smblib_get_prop_batt_health(chg, val);
+		if (chg->oem_batt_psy) {
+			rc = power_supply_get_property(chg->oem_batt_psy,
+					POWER_SUPPLY_PROP_HEALTH, val);
+		} else {
+			rc = smblib_get_prop_batt_health(chg, val);
+		}
 		break;
 	case POWER_SUPPLY_PROP_PRESENT:
 		rc = smblib_get_prop_batt_present(chg, val);
@@ -1765,14 +1811,21 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 		rc = smblib_get_prop_batt_charge_type(chg, val);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
-		rc = smblib_get_prop_batt_capacity(chg, val);
+		if (chg->oem_batt_psy) {
+			rc = power_supply_get_property(chg->oem_batt_psy,
+					POWER_SUPPLY_PROP_CAPACITY, val);
+		} else {
+			rc = smblib_get_prop_batt_capacity(chg, val);
+		}
 		break;
+#ifndef FEATURE_CUSTOM_DET_DRIVER
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
 		rc = smblib_get_prop_system_temp_level(chg, val);
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX:
 		rc = smblib_get_prop_system_temp_level_max(chg, val);
 		break;
+#endif
 	case POWER_SUPPLY_PROP_CHARGER_TEMP:
 		rc = smblib_get_prop_charger_temp(chg, val);
 		break;
@@ -1821,11 +1874,17 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 		rc = smblib_get_prop_batt_iterm(chg, val);
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
-		if (chg->typec_mode == POWER_SUPPLY_TYPEC_SINK_DEBUG_ACCESSORY)
+		if (chg->typec_mode == POWER_SUPPLY_TYPEC_SINK_DEBUG_ACCESSORY) {
 			val->intval = DEBUG_ACCESSORY_TEMP_DECIDEGC;
-		else
-			rc = smblib_get_prop_from_bms(chg,
+		} else {
+			if (chg->oem_batt_psy) {
+				rc = power_supply_get_property(chg->oem_batt_psy,
 						POWER_SUPPLY_PROP_TEMP, val);
+			} else {
+				rc = smblib_get_prop_from_bms(chg,
+							POWER_SUPPLY_PROP_TEMP, val);
+			}
+		}
 		break;
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
 		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
@@ -3585,6 +3644,12 @@ static int smb5_probe(struct platform_device *pdev)
 			pr_err("Couldn't setup chg_config rc=%d\n", rc);
 		return rc;
 	}
+
+#ifdef FEATURE_CUSTOM_DET_DRIVER
+	rc = custom_det_init(chg);
+	if (rc < 0)
+		return rc;
+#endif /* FEATURE_CUSTOM_DET_DRIVER */
 
 	rc = smb5_parse_dt(chip);
 	if (rc < 0) {

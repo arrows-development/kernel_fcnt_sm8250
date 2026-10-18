@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * Event char devices, giving access to raw input device events.
  *
@@ -249,7 +252,8 @@ static void __pass_event(struct evdev_client *client,
 
 static void evdev_pass_values(struct evdev_client *client,
 			const struct input_value *vals, unsigned int count,
-			ktime_t *ev_time)
+			ktime_t *ev_time,
+			bool log)
 {
 	struct evdev *evdev = client->evdev;
 	const struct input_value *v;
@@ -284,6 +288,13 @@ static void evdev_pass_values(struct evdev_client *client,
 		event.type = v->type;
 		event.code = v->code;
 		event.value = v->value;
+		if (log) {
+			if (EV_KEY == v->type) {
+				if (v->code == KEY_POWER || v->code == KEY_VOLUMEUP || v->code == KEY_VOLUMEDOWN) {
+					printk("REC@REC@0 key %d %s\n", v->code, (v->value == 1) ? "press" : "release");
+				}
+			}
+		}
 		__pass_event(client, &event);
 	}
 
@@ -302,16 +313,19 @@ static void evdev_events(struct input_handle *handle,
 	struct evdev *evdev = handle->private;
 	struct evdev_client *client;
 	ktime_t *ev_time = input_get_timestamp(handle->dev);
-
+	bool log = true;
 	rcu_read_lock();
 
 	client = rcu_dereference(evdev->grab);
 
-	if (client)
-		evdev_pass_values(client, vals, count, ev_time);
-	else
-		list_for_each_entry_rcu(client, &evdev->client_list, node)
-			evdev_pass_values(client, vals, count, ev_time);
+	if (client) {
+		evdev_pass_values(client, vals, count, ev_time, log);
+	} else {
+		list_for_each_entry_rcu(client, &evdev->client_list, node) {
+			evdev_pass_values(client, vals, count, ev_time, log);
+			log = false;
+		}
+	}
 
 	rcu_read_unlock();
 }

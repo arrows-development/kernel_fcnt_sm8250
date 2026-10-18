@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * Block driver for media (i.e., flash cards)
  *
@@ -1836,6 +1839,25 @@ static inline bool mmc_blk_cmd_started(struct mmc_blk_request *brq)
 	       !(brq->cmd.resp[0] & CMD_ERRORS);
 }
 
+void mmc_blk_broken_notify(struct mmc_card *card)
+{
+	struct mmc_blk_data *md;
+
+	if (unlikely(!card))
+		return;
+
+	if (!mmc_card_readonly(card)) {
+		md = dev_get_drvdata(&card->dev);
+		if (md && md->disk) {
+			FJ_SD_REC_LOG("%s: SD card Broken: write fail\n",
+							mmc_hostname(card->host));
+			mmc_card_set_readonly(card);
+			set_disk_ro(md->disk, 1);
+		}
+	}
+	return;
+}
+
 /*
  * Requests are completed by mmc_blk_mq_complete_rq() which sets simple
  * policy:
@@ -1877,8 +1899,19 @@ static void mmc_blk_mq_rw_recovery(struct mmc_queue *mq, struct request *req)
 	 * Try again to get the status. This also provides an opportunity for
 	 * re-tuning.
 	 */
-	if (err)
-		err = __mmc_send_status(card, &status, 0);
+	if (err) {
+		if (mmc_card_sd(card)) {
+			mmc_retune_disable(card->host);
+			pr_err("%s: recovery hw_reset\n", req->rq_disk->disk_name);
+			err = mmc_hw_reset(card->host);
+			if (!err)
+				err = __mmc_send_status(card, &status, 0);
+			else
+				pr_err("%s: recovery hw_reset failed!\n", req->rq_disk->disk_name);
+		} else {
+			err = __mmc_send_status(card, &status, 0);
+		}
+	}
 
 	/*
 	 * Nothing more to do after the number of bytes transferred has been
@@ -1889,8 +1922,15 @@ static void mmc_blk_mq_rw_recovery(struct mmc_queue *mq, struct request *req)
 
 	/* Try to get back to "tran" state */
 	if (!mmc_host_is_spi(mq->card->host) &&
-	    (err || !mmc_blk_in_tran_state(status)))
+	    (err || !mmc_blk_in_tran_state(status))) {
 		err = mmc_blk_fix_state(mq->card, req);
+		if (err && mmc_card_sd(card)) {
+			mmc_blk_broken_notify(card);
+			mqrq->retries = MMC_NO_RETRIES;
+			err = mmc_hw_reset(card->host);
+			return;
+		}
+	}
 
 	/*
 	 * Special case for SD cards where the card might record the number of
@@ -1914,6 +1954,23 @@ static void mmc_blk_mq_rw_recovery(struct mmc_queue *mq, struct request *req)
 		return;
 	}
 
+	if (mmc_card_sd(card)) {
+		if (brq->data.error == -ETIMEDOUT)
+			mmc_countup_exponent(&brq->data, card);
+
+		if (mqrq->retries + 1 != MMC_MAX_RETRIES &&
+			card->change_speed_uhs != 0xFFFFFFFF) {
+			pr_err("%s: do hw reset to change speed:bytes_xfered:%d\n",
+					req->rq_disk->disk_name, brq->data.bytes_xfered);
+			err = mmc_hw_reset(card->host);
+			if (err) {
+				pr_err("%s: hw_reset failed!\n", req->rq_disk->disk_name);
+				mqrq->retries = MMC_NO_RETRIES;
+				mmc_card_set_removed(card);
+				return;
+			}
+		}
+	}
 	/*
 	 * If anything was done, just return and if there is anything remaining
 	 * on the request it will get requeued.
@@ -1936,7 +1993,7 @@ static void mmc_blk_mq_rw_recovery(struct mmc_queue *mq, struct request *req)
 	}
 
 	/* FIXME: Missing single sector read for large sector size */
-	if (!mmc_large_sector(card) && rq_data_dir(req) == READ &&
+	if (!mmc_card_sd(card) && !mmc_large_sector(card) && rq_data_dir(req) == READ &&
 	    brq->data.blocks > 1) {
 		/* Read one sector at a time */
 		mmc_blk_read_single(mq, req);

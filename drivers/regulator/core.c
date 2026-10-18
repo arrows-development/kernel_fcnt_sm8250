@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * core.c  --  Voltage/Current Regulator framework.
  *
@@ -37,6 +40,8 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/regulator.h>
+
+#include <linux/switch_logout.h>
 
 #include "dummy.h"
 #include "internal.h"
@@ -5299,6 +5304,32 @@ static const struct file_operations regulator_summary_fops = {
 	.release	= single_release,
 #endif
 };
+
+#ifdef CONFIG_DEBUG_FS
+void regulator_switch_dump(void)
+{
+	struct seq_file *s;
+
+	s = switch_print_seq_alloc(REGULATOR_SWITCH_DUMP_SIZE);
+
+	if (!s)
+		return;
+
+	regulator_summary_show(s, NULL);
+
+	switch_print_seq_kmsg(s);
+
+	switch_print_seq_free(s);
+
+	return;
+}
+#else	/* DEBUG_FS */
+void regulator_switch_dump(void)
+{
+	return;
+}
+#endif	/* DEBUG_FS */
+EXPORT_SYMBOL_GPL(regulator_switch_dump);
 
 static int _regulator_debug_print_enabled(struct device *dev, void *data)
 {

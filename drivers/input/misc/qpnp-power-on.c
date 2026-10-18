@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
@@ -86,6 +89,8 @@
 #define QPNP_PON_S3_DBC_CTL(pon)		((pon)->base + 0x75)
 #define QPNP_PON_SMPL_CTL(pon)			((pon)->base + 0x7F)
 #define QPNP_PON_TRIGGER_EN(pon)		((pon)->base + 0x80)
+#define QPNP_PON_TRIGGER_EDGE_CONFIG(pon)	((pon)->base + 0x81)
+#define QPNP_PON_OPTION_BIT(pon)			((pon)->base + 0x82)
 #define QPNP_PON_XVDD_RB_SPARE(pon)		((pon)->base + 0x8E)
 #define QPNP_PON_SOFT_RB_SPARE(pon)		((pon)->base + 0x8F)
 #define QPNP_PON_SEC_ACCESS(pon)		((pon)->base + 0xD0)
@@ -625,6 +630,21 @@ static int qpnp_resin_pon_reset_config(struct qpnp_pon *pon,
 	return 0;
 }
 
+static int qpnp_pon_kypad_trigger_config( void )
+{
+	int rc = 0;
+	unsigned int reg = 0;
+	struct qpnp_pon *pon = sys_reset_dev;
+
+	pr_debug("[QPNP]base:%x  USID:%d \n", pon->base, to_spmi_device(pon->dev->parent)->usid);
+
+	rc |= qpnp_pon_masked_write(pon, QPNP_PON_OPTION_BIT(pon), 0x20, 0x00);
+	rc |= regmap_read(pon->regmap, QPNP_PON_OPTION_BIT(pon), &reg);
+	rc |= regmap_write(pon->regmap, QPNP_PON_TRIGGER_EDGE_CONFIG(pon), reg);
+
+	return rc;
+}
+
 /**
  * qpnp_pon_system_pwr_off() - Configure system-reset PMIC for shutdown or reset
  * @type: Determines the type of power off to perform - shutdown, reset, etc
@@ -690,6 +710,8 @@ out:
 	if (!!pon_ship_mode_en) {
 		batt_psy = power_supply_get_by_name("battery");
 		if (batt_psy) {
+			if (qpnp_pon_kypad_trigger_config())
+				dev_err(sys_reset_dev->dev, "Error configuring Kypad trigger when ship mode enable");
 			pr_debug("Setting ship mode\n");
 			val.intval = 1;
 			rc = power_supply_set_property(batt_psy,

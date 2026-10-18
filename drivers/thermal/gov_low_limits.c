@@ -53,6 +53,13 @@ static void thermal_zone_trip_update(struct thermal_zone_device *tz, int trip)
 		if (instance->initialized && old_target == instance->target)
 			continue;
 
+		if (old_target != instance->target)
+			printk("REC@TEM@39 thermal_zone%d "
+			"%s temp=%d Trip%d[type=%d,temp=%d] throttle=%d "
+			"cooling_device%d %s old_target=%d, target=%d\n",
+			tz->id, tz->type, tz->temperature, trip, trip_type, trip_temp, throttle,
+			instance->cdev->id, instance->cdev->type, old_target, (int)instance->target);
+
 		if (!instance->initialized) {
 			if (instance->target != THERMAL_NO_TARGET) {
 				trace_thermal_zone_trip(tz, trip, trip_type,

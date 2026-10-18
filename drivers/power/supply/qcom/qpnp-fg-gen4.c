@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2020 The Linux Foundation. All rights reserved.
@@ -21,6 +24,7 @@
 #include "fg-core.h"
 #include "fg-reg.h"
 #include "fg-alg.h"
+#include "oem_charger_local.h"
 
 #define FG_GEN4_DEV_NAME	"qcom,fg-gen4"
 #define TTF_AWAKE_VOTER		"fg_ttf_awake"
@@ -331,7 +335,11 @@ struct bias_config {
 	int	bias_kohms;
 };
 
+#if 0
 static int fg_gen4_debug_mask;
+#else
+static int fg_gen4_debug_mask = FG_IRQ | FG_STATUS;
+#endif
 
 static bool fg_profile_dump;
 static ssize_t profile_dump_show(struct device *dev, struct device_attribute
@@ -599,6 +607,66 @@ struct bias_config id_table[3] = {
 	{0x6D, 0x6E, 100},
 	{0x75, 0x76, 30},
 };
+
+#define CYCLE_SYS_TERM_CURR_MA		(325)
+#define CYCLE_CC_CV_THRESHOLD_MV	(4320)
+static int fg_set_cycle_chg_level(struct fg_gen4_chip *chip, int cycle_lvl)
+{
+	int rc = 0;
+	int sys_term_curr_ma = 0;
+	int cc_cv_threshold_mv = 0;
+	u8 buf[4];
+	struct fg_dev *fg = &chip->fg;
+	struct device_node *node = fg->dev->of_node;
+
+	if (fg->cycle_chg_lvl != cycle_lvl) {
+		switch (cycle_lvl) {
+		case CHG_CYCLE_LEVEL_NONE:
+			rc = of_property_read_u32(node, "qcom,fg-sys-term-current", &sys_term_curr_ma);
+			if (rc < 0)
+				sys_term_curr_ma = 0;
+			rc = of_property_read_u32(node, "qcom,fg-cc-cv-threshold-mv", &cc_cv_threshold_mv);
+			if (rc < 0)
+				cc_cv_threshold_mv = 0;
+			break;
+
+		case CHG_CYCLE_LEVEL_01:
+			rc = of_property_read_u32(node, "qcom,fg-cycle-lv1-sys-term-current", &sys_term_curr_ma);
+			if (rc < 0)
+				sys_term_curr_ma = 0;
+			rc = of_property_read_u32(node, "qcom,fg-cycle-lv1-cc-cv-threshold-mv", &cc_cv_threshold_mv);
+			if (rc < 0)
+				cc_cv_threshold_mv = 0;
+			break;
+
+		case CHG_CYCLE_LEVEL_02:
+		default:
+			rc = of_property_read_u32(node, "qcom,fg-cycle-lv2-sys-term-current", &sys_term_curr_ma);
+			if (rc < 0)
+				sys_term_curr_ma = 0;
+			rc = of_property_read_u32(node, "qcom,fg-cycle-lv2-cc-cv-threshold-mv", &cc_cv_threshold_mv);
+			if (rc < 0)
+				cc_cv_threshold_mv = 0;
+			break;
+		}
+
+		if (sys_term_curr_ma != 0) {
+			fg_encode(fg->sp, FG_SRAM_SYS_TERM_CURR, sys_term_curr_ma, buf);
+			rc = fg_sram_write(fg,
+					fg->sp[FG_SRAM_SYS_TERM_CURR].addr_word,
+					fg->sp[FG_SRAM_SYS_TERM_CURR].addr_byte, buf,
+					fg->sp[FG_SRAM_SYS_TERM_CURR].len, FG_IMA_DEFAULT);
+		}
+		if (cc_cv_threshold_mv != 0) {
+			fg->cc_cv_threshold_mv = cc_cv_threshold_mv;
+			rc = fg_set_constant_chg_voltage(fg,
+						fg->cc_cv_threshold_mv * 1000);
+		}
+		fg->cycle_chg_lvl = cycle_lvl;
+	}
+
+	return rc;
+}
 
 #define BID_VREF_MV	1875
 static int fg_get_batt_id_adc(struct fg_gen4_chip *chip, u32 *batt_id_ohms)
@@ -4499,6 +4567,8 @@ static int fg_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		if (fg->battery_missing)
 			pval->intval = 3700000;
+		else if (fg->fg_restarting)
+			pval->intval = 4300000;
 		else
 			rc = fg_get_battery_voltage(fg, &pval->intval);
 		break;
@@ -4618,6 +4688,15 @@ static int fg_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CALIBRATE:
 		pval->intval = chip->calib_level;
 		break;
+
+	case POWER_SUPPLY_PROP_MSOC_RAW:
+		if (fg->fg_restarting) {
+			pval->intval = fg->last_msoc_raw;
+		} else {
+			rc = fg_get_msoc_raw(fg, &pval->intval);
+		}
+		break;
+
 	default:
 		pr_err("unsupported property %d\n", psp);
 		rc = -EINVAL;
@@ -4712,6 +4791,9 @@ static int fg_psy_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CALIBRATE:
 		rc = fg_gen4_set_calibrate_level(chip, pval->intval);
 		break;
+	case POWER_SUPPLY_PROP_CYCLE_CHG:
+		rc = fg_set_cycle_chg_level(chip, pval->intval);		
+	    break;
 	default:
 		break;
 	}
@@ -6221,6 +6303,7 @@ static int fg_gen4_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	fg = &chip->fg;
+	fg->cycle_chg_lvl = CHG_CYCLE_LEVEL_NONE;		
 	fg->dev = &pdev->dev;
 	fg->debug_mask = &fg_gen4_debug_mask;
 	fg->irqs = fg_irqs;

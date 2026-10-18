@@ -12,7 +12,9 @@
  *	Copyright (c) 2010 Dmitry Torokhov
  *	Input handler conversion
  */
-
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/sched/signal.h>
@@ -279,7 +281,8 @@ static struct sysrq_key_op sysrq_showregs_op = {
 static void sysrq_handle_showstate(int key)
 {
 	show_state();
-	show_workqueue_state();
+//	show_workqueue_state();
+	printk("FTA trace finished\n");
 }
 static struct sysrq_key_op sysrq_showstate_op = {
 	.handler	= sysrq_handle_showstate,

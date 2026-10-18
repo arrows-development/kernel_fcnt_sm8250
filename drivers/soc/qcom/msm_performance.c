@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
  */
@@ -18,6 +21,13 @@
 #include <linux/input.h>
 #include <linux/kthread.h>
 #include <linux/sched/core_ctl.h>
+
+#include <linux/pm_qos.h>
+#include <linux/topology.h>
+
+#define LITTLE_CLUSTER_MASK     (*(topology_core_cpumask(0)))
+#define BIG_CLUSTER_MASK        (*(topology_core_cpumask(4)))
+#define PRIME_CLUSTER_MASK      (*(topology_core_cpumask(7)))
 
 /*
  * Sched will provide the data for every 20ms window,
@@ -53,6 +63,13 @@ static unsigned int aggr_big_nr;
 static unsigned int aggr_top_load;
 static unsigned int top_load[CLUSTER_MAX];
 static unsigned int curr_cap[CLUSTER_MAX];
+
+static struct pm_qos_request pm_qos_lit_max_freq;
+static struct pm_qos_request pm_qos_lit_min_freq;
+static struct pm_qos_request pm_qos_big_max_freq;
+static struct pm_qos_request pm_qos_big_min_freq;
+static struct pm_qos_request pm_qos_pri_max_freq;
+static struct pm_qos_request pm_qos_pri_min_freq;
 
 /*******************************sysfs start************************************/
 static int set_cpu_min_freq(const char *buf, const struct kernel_param *kp)
@@ -104,8 +121,26 @@ static int set_cpu_min_freq(const char *buf, const struct kernel_param *kp)
 		if (cpufreq_get_policy(&policy, i))
 			continue;
 
+#if 0
 		if (cpu_online(i) && (policy.min != i_cpu_stats->min))
 			cpufreq_update_policy(i);
+#else
+		if (cpu_online(i) && (policy.min != i_cpu_stats->min)) {
+			cpufreq_update_policy(i);
+			pr_debug("cpu:%d min freq:%d cpumsk:%*pbl\n",
+			    i, i_cpu_stats->min, cpumask_pr_args(policy.related_cpus));
+			if (cpumask_test_cpu(i, &LITTLE_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_lit_min_freq))
+					pm_qos_update_request(&pm_qos_lit_min_freq, i_cpu_stats->min);
+			} else if (cpumask_test_cpu(i, &BIG_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_big_min_freq))
+					pm_qos_update_request(&pm_qos_big_min_freq, i_cpu_stats->min);
+			} else if (cpumask_test_cpu(i, &PRIME_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_pri_min_freq))
+					pm_qos_update_request(&pm_qos_pri_min_freq, i_cpu_stats->min);
+			}
+		}
+#endif
 
 		for_each_cpu(j, policy.related_cpus)
 			cpumask_clear_cpu(j, limit_mask);
@@ -174,8 +209,26 @@ static int set_cpu_max_freq(const char *buf, const struct kernel_param *kp)
 		if (cpufreq_get_policy(&policy, i))
 			continue;
 
+#if 0
 		if (cpu_online(i) && (policy.max != i_cpu_stats->max))
 			cpufreq_update_policy(i);
+#else
+		if (cpu_online(i) && (policy.max != i_cpu_stats->max)) {
+			cpufreq_update_policy(i);
+			pr_debug("cpu:%d max freq:%d cpumsk:%*pbl\n",
+			    i, i_cpu_stats->max, cpumask_pr_args(policy.related_cpus));
+			if (cpumask_test_cpu(i, &LITTLE_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_lit_max_freq))
+					pm_qos_update_request(&pm_qos_lit_max_freq, i_cpu_stats->max);
+			} else if (cpumask_test_cpu(i, &BIG_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_big_max_freq))
+					pm_qos_update_request(&pm_qos_big_max_freq, i_cpu_stats->max);
+			} else if (cpumask_test_cpu(i, &PRIME_CLUSTER_MASK)) {
+				if (pm_qos_request_active(&pm_qos_pri_max_freq))
+					pm_qos_update_request(&pm_qos_pri_max_freq, i_cpu_stats->max);
+			}
+		}
+#endif
 
 		for_each_cpu(j, policy.related_cpus)
 			cpumask_clear_cpu(j, limit_mask);
@@ -510,6 +563,13 @@ static int __init msm_performance_init(void)
 
 	init_events_group();
 	init_notify_group();
+
+	pm_qos_add_request(&pm_qos_lit_max_freq, PM_QOS_LIT_MAXF, INT_MAX);
+	pm_qos_add_request(&pm_qos_lit_min_freq, PM_QOS_LIT_MINF, 0);
+	pm_qos_add_request(&pm_qos_big_max_freq, PM_QOS_BIG_MAXF, INT_MAX);
+	pm_qos_add_request(&pm_qos_big_min_freq, PM_QOS_BIG_MINF, 0);
+	pm_qos_add_request(&pm_qos_pri_max_freq, PM_QOS_PRIM_MAXF, INT_MAX);
+	pm_qos_add_request(&pm_qos_pri_min_freq, PM_QOS_PRIM_MINF, 0);
 
 	return 0;
 }

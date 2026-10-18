@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * Copyright (C) 2013-2017 ARM Limited, All Rights Reserved.
  * Author: Marc Zyngier <marc.zyngier@arm.com>
@@ -42,6 +45,9 @@
 #include <asm/virt.h>
 
 #include <linux/syscore_ops.h>
+
+#include <linux/kernel_stat.h>
+#include <linux/switch_logout.h>
 
 #include "irq-gic-common.h"
 
@@ -395,6 +401,7 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 	     i = find_next_bit((unsigned long *)pending, gic->irq_nr, i+1)) {
 		unsigned int irq = irq_find_mapping(gic->domain, i);
 		struct irq_desc *desc = irq_to_desc(irq);
+#if 0
 		const char *name = "null";
 
 		if (desc == NULL)
@@ -403,6 +410,26 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 			name = desc->action->name;
 
 		pr_warn("%s: %d triggered %s\n", __func__, irq, name);
+#endif
+		unsigned long flags;
+		char buf[256];
+
+		if (desc) {
+			raw_spin_lock_irqsave(&desc->lock, flags);
+			snprintf(buf, sizeof(buf), "irq=%d name=%s%s%s handle_irq=%pf action=%s handler=%pf count=%u",
+				irq,(desc->irq_data.chip ? (desc->irq_data.chip->name ? desc->irq_data.chip->name : "-") : "None"),
+				(desc->name ? "-" : ""),
+				(desc->name ? desc->name : ""),
+				(desc->handle_irq ? desc->handle_irq : 0),
+				(desc->action ? desc->action->name : ""),
+				(desc->action ? desc->action->handler : 0),
+				kstat_irqs(irq));
+			raw_spin_unlock_irqrestore(&desc->lock, flags);
+			printk(KERN_NOTICE "%s: triggered %s\n", __func__, buf);
+		} else {
+			pr_warning("%s: %d triggered %s\n", __func__,
+					irq, "stray irq");
+		}
 	}
 }
 

@@ -1,9 +1,16 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * Synaptics TCM touchscreen driver
  *
- * Copyright (C) 2017-2019 Synaptics Incorporated. All rights reserved.
+ * Copyright (C) 2017-2018 Synaptics Incorporated. All rights reserved.
  *
- * Copyright (C) 2017-2019 Scott Lin <scott.lin@tw.synaptics.com>
+ * Copyright (C) 2017-2018 Scott Lin <scott.lin@tw.synaptics.com>
+ * Copyright (C) 2018-2019 Ian Su <ian.su@tw.synaptics.com>
+ * Copyright (C) 2018-2019 Joey Zhou <joey.zhou@synaptics.com>
+ * Copyright (C) 2018-2019 Yuehao Qiu <yuehao.qiu@synaptics.com>
+ * Copyright (C) 2018-2019 Aaron Chen <aaron.chen@tw.synaptics.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -32,8 +39,9 @@
 
 #include <linux/i2c.h>
 #include <linux/of_gpio.h>
+#include <drm/drm_panel.h>
+
 #include "synaptics_tcm_core.h"
-#include "linux/moduleparam.h"
 
 #define XFER_ATTEMPTS 10
 
@@ -47,99 +55,168 @@ static struct syna_tcm_hw_interface hw_if;
 
 static struct platform_device *syna_tcm_i2c_device;
 
-static struct drm_panel *active_tcm_panel;
-
-struct drm_panel *tcm_get_panel(void)
-{
-	return active_tcm_panel;
-}
-
+#define SYNA_TCM_PANEL_WAIT_RETRY 300
+static int panel_retry_cnt = 0;
+extern struct drm_panel *active_panel;
 
 #ifdef CONFIG_OF
 static int parse_dt(struct device *dev, struct syna_tcm_board_data *bdata)
 {
 	int retval;
+	u32 value;
+	struct property *prop;
 	struct device_node *np = dev->of_node;
+	const char *name;
 
-	retval = of_get_named_gpio_flags(np,
-			"synaptics,irq-gpio", 0,
-			(enum of_gpio_flags *)&bdata->irq_flags);
-	if (!gpio_is_valid(retval)) {
-		if (retval != -EPROBE_DEFER)
-			dev_err(dev, "Error getting irq_gpio\n");
-		return retval;
+	prop = of_find_property(np, "synaptics,irq-gpio", NULL);
+	if (prop && prop->length) {
+		bdata->irq_gpio = of_get_named_gpio_flags(np,
+				"synaptics,irq-gpio", 0,
+				(enum of_gpio_flags *)&bdata->irq_flags);
+	} else {
+		bdata->irq_gpio = -1;
 	}
-	bdata->irq_gpio = retval;
 
-	of_property_read_u32(np, "synaptics,irq-on-state",
-			&bdata->irq_on_state);
-	of_property_read_string(np, "synaptics,pwr-reg-name",
-			&bdata->pwr_reg_name);
-	of_property_read_string(np, "synaptics,bus-reg-name",
-			&bdata->bus_reg_name);
-	of_property_read_string(np, "synaptics,firmware-name",
-			&bdata->fw_name);
+	retval = of_property_read_u32(np, "synaptics,irq-on-state", &value);
+	if (retval < 0)
+		bdata->irq_on_state = 0;
+	else
+		bdata->irq_on_state = value;
 
-	bdata->power_gpio = of_get_named_gpio_flags(np,
-			"synaptics,power-gpio", 0, NULL);
+	retval = of_property_read_string(np, "synaptics,pwr-reg-name", &name);
+	if (retval < 0)
+		bdata->pwr_reg_name = NULL;
+	else
+		bdata->pwr_reg_name = name;
 
-	retval = of_property_read_u32(np, "synaptics,power-on-state",
-			&bdata->power_on_state);
-	if (retval < 0) {
-		LOGD(dev, "Failed to read synaptics,power-on-state\n");
+	retval = of_property_read_string(np, "synaptics,bus-reg-name", &name);
+	if (retval < 0)
+		bdata->bus_reg_name = NULL;
+	else
+		bdata->bus_reg_name = name;
+
+	prop = of_find_property(np, "synaptics,power-gpio", NULL);
+	if (prop && prop->length) {
+		bdata->power_gpio = of_get_named_gpio_flags(np,
+				"synaptics,power-gpio", 0, NULL);
+	} else {
+		bdata->power_gpio = -1;
+	}
+
+	prop = of_find_property(np, "synaptics,power-on-state", NULL);
+	if (prop && prop->length) {
+		retval = of_property_read_u32(np, "synaptics,power-on-state",
+				&value);
+		if (retval < 0) {
+			LOGE(dev,
+					"Failed to read synaptics,power-on-state property\n");
+			return retval;
+		} else {
+			bdata->power_on_state = value;
+		}
+	} else {
 		bdata->power_on_state = 0;
 	}
 
-	retval = of_property_read_u32(np, "synaptics,power-delay-ms",
-			&bdata->power_delay_ms);
-	if (retval < 0) {
-		LOGE(dev, "Failed to read synaptics,power-delay-ms\n");
-		return retval;
+	prop = of_find_property(np, "synaptics,power-delay-ms", NULL);
+	if (prop && prop->length) {
+		retval = of_property_read_u32(np, "synaptics,power-delay-ms",
+				&value);
+		if (retval < 0) {
+			LOGE(dev,
+					"Failed to read synaptics,power-delay-ms property\n");
+			return retval;
+		} else {
+			bdata->power_delay_ms = value;
+		}
+	} else {
+		bdata->power_delay_ms = 0;
 	}
 
-	retval = of_get_named_gpio_flags(np,
-			"synaptics,reset-gpio", 0, NULL);
-	if (!gpio_is_valid(retval)) {
-		if (retval != -EPROBE_DEFER)
-			dev_err(dev, "Error getting reset gpio\n");
-		return retval;
-	}
-	bdata->reset_gpio = retval;
-
-	retval = of_property_read_u32(np, "synaptics,reset-on-state",
-			&bdata->reset_on_state);
-	if (retval < 0) {
-		LOGE(dev, "Failed to read synaptics,reset-on-state\n");
-		return retval;
+	prop = of_find_property(np, "synaptics,reset-gpio", NULL);
+	if (prop && prop->length) {
+		bdata->reset_gpio = of_get_named_gpio_flags(np,
+				"synaptics,reset-gpio", 0, NULL);
+	} else {
+		bdata->reset_gpio = -1;
 	}
 
-	retval = of_property_read_u32(np, "synaptics,reset-active-ms",
-			&bdata->reset_active_ms);
-	if (retval < 0) {
-		LOGE(dev, "Failed to read synaptics,reset-active-ms\n");
-		return retval;
+	prop = of_find_property(np, "synaptics,reset-on-state", NULL);
+	if (prop && prop->length) {
+		retval = of_property_read_u32(np, "synaptics,reset-on-state",
+				&value);
+		if (retval < 0) {
+			LOGE(dev,
+					"Failed to read synaptics,reset-on-state property\n");
+			return retval;
+		} else {
+			bdata->reset_on_state = value;
+		}
+	} else {
+		bdata->reset_on_state = 0;
 	}
 
-	retval = of_property_read_u32(np, "synaptics,reset-delay-ms",
-			&bdata->reset_delay_ms);
-	if (retval < 0) {
-		LOGE(dev, "Unable to read synaptics,reset-delay-ms\n");
-		return retval;
+	prop = of_find_property(np, "synaptics,reset-active-ms", NULL);
+	if (prop && prop->length) {
+		retval = of_property_read_u32(np, "synaptics,reset-active-ms",
+				&value);
+		if (retval < 0) {
+			LOGE(dev,
+					"Failed to read synaptics,reset-active-ms property\n");
+			return retval;
+		} else {
+			bdata->reset_active_ms = value;
+		}
+	} else {
+		bdata->reset_active_ms = 0;
 	}
 
-	bdata->x_flip = of_property_read_bool(np, "synaptics,x-flip");
-	bdata->y_flip = of_property_read_bool(np, "synaptics,y-flip");
-	bdata->swap_axes = of_property_read_bool(np, "synaptics,swap-axes");
-
-	retval = of_property_read_u32(np, "synaptics,ubl-i2c-addr",
-			&bdata->ubl_i2c_addr);
-	if (retval < 0) {
-		LOGE(dev, "Unable to read synaptics,ubl-i2c-addr\n");
-		return retval;
+	prop = of_find_property(np, "synaptics,reset-delay-ms", NULL);
+	if (prop && prop->length) {
+		retval = of_property_read_u32(np, "synaptics,reset-delay-ms",
+				&value);
+		if (retval < 0) {
+			LOGE(dev,
+					"Unable to read synaptics,reset-delay-ms property\n");
+			return retval;
+		} else {
+			bdata->reset_delay_ms = value;
+		}
+	} else {
+		bdata->reset_delay_ms = 0;
 	}
 
-	bdata->extend_report = of_property_read_bool(np,
-			"synaptics,extend_report");
+	prop = of_find_property(np, "synaptics,tpio-reset-gpio", NULL);
+	if (prop && prop->length) {
+		bdata->tpio_reset_gpio = of_get_named_gpio_flags(np,
+				"synaptics,tpio-reset-gpio", 0, NULL);
+	} else {
+		bdata->tpio_reset_gpio = -1;
+	}
+
+	prop = of_find_property(np, "synaptics,x-flip", NULL);
+	bdata->x_flip = prop > 0 ? true : false;
+
+	prop = of_find_property(np, "synaptics,y-flip", NULL);
+	bdata->y_flip = prop > 0 ? true : false;
+
+	prop = of_find_property(np, "synaptics,swap-axes", NULL);
+	bdata->swap_axes = prop > 0 ? true : false;
+
+	prop = of_find_property(np, "synaptics,ubl-i2c-addr", NULL);
+	if (prop && prop->length) {
+		retval = of_property_read_u32(np, "synaptics,ubl-i2c-addr",
+				&value);
+		if (retval < 0) {
+			LOGE(dev,
+					"Unable to read synaptics,ubl-i2c-addr property\n");
+			return retval;
+		} else {
+			bdata->ubl_i2c_addr = value;
+		}
+	} else {
+		bdata->ubl_i2c_addr = 0;
+	}
 
 	return 0;
 }
@@ -195,11 +272,11 @@ static int syna_tcm_i2c_rmi_read(struct syna_tcm_hcd *tcm_hcd,
 			retval = length;
 			goto exit;
 		}
-
-		LOGD(&i2c->dev, "Transfer attempt %d times\n", attempt + 1);
+		LOGE(&i2c->dev,
+				"Transfer attempt %d failed\n",
+				attempt + 1);
 
 		if (attempt + 1 == XFER_ATTEMPTS) {
-			LOGE(&i2c->dev, "Transfer failed\n");
 			retval = -EIO;
 			goto exit;
 		}
@@ -256,11 +333,11 @@ static int syna_tcm_i2c_rmi_write(struct syna_tcm_hcd *tcm_hcd,
 			retval = length;
 			goto exit;
 		}
-
-		LOGD(&i2c->dev, "Transfer attempt %d times\n", attempt + 1);
+		LOGE(&i2c->dev,
+				"Transfer attempt %d failed\n",
+				attempt + 1);
 
 		if (attempt + 1 == XFER_ATTEMPTS) {
-			LOGE(&i2c->dev, "Transfer failed\n");
 			retval = -EIO;
 			goto exit;
 		}
@@ -294,11 +371,11 @@ static int syna_tcm_i2c_read(struct syna_tcm_hcd *tcm_hcd, unsigned char *data,
 			retval = length;
 			goto exit;
 		}
-
-		LOGD(&i2c->dev, "Transfer attempt %d times\n", attempt + 1);
+		LOGE(&i2c->dev,
+				"Transfer attempt %d failed\n",
+				attempt + 1);
 
 		if (attempt + 1 == XFER_ATTEMPTS) {
-			LOGE(&i2c->dev, "Transfer failed\n");
 			retval = -EIO;
 			goto exit;
 		}
@@ -312,45 +389,7 @@ exit:
 	return retval;
 }
 
-static int syna_tcm_i2c_write(struct syna_tcm_hcd *tcm_hcd, unsigned char *data,
-		unsigned int length)
-{
-	int retval;
-	unsigned int attempt;
-	struct i2c_msg msg;
-	struct i2c_client *i2c = to_i2c_client(tcm_hcd->pdev->dev.parent);
-
-	mutex_lock(&tcm_hcd->io_ctrl_mutex);
-
-	msg.addr = i2c->addr;
-	msg.flags = 0;
-	msg.len = length;
-	msg.buf = data;
-
-	for (attempt = 0; attempt < XFER_ATTEMPTS; attempt++) {
-		if (i2c_transfer(i2c->adapter, &msg, 1) == 1) {
-			retval = length;
-			goto exit;
-		}
-
-		LOGD(&i2c->dev, "Transfer attempt %d times\n", attempt + 1);
-
-		if (attempt + 1 == XFER_ATTEMPTS) {
-			LOGE(&i2c->dev, "Transfer failed\n");
-			retval = -EIO;
-			goto exit;
-		}
-
-		msleep(20);
-	}
-
-exit:
-	mutex_unlock(&tcm_hcd->io_ctrl_mutex);
-
-	return retval;
-}
-
-static int syna_tcm_check_dt(struct device_node *np)
+static int check_dt(struct device_node *np)
 {
 	int i;
 	int count;
@@ -366,7 +405,7 @@ static int syna_tcm_check_dt(struct device_node *np)
 		panel = of_drm_find_panel(node);
 		of_node_put(node);
 		if (!IS_ERR(panel)) {
-			active_tcm_panel = panel;
+			active_panel = panel;
 			return 0;
 		}
 	}
@@ -374,7 +413,7 @@ static int syna_tcm_check_dt(struct device_node *np)
 	return -ENODEV;
 }
 
-static int syna_tcm_check_default_tp(struct device_node *dt, const char *prop)
+static int check_default_tp(struct device_node *dt, const char *prop)
 {
 	const char *active_tp;
 	const char *compatible;
@@ -403,19 +442,64 @@ static int syna_tcm_check_default_tp(struct device_node *dt, const char *prop)
 	return ret;
 }
 
+static int syna_tcm_i2c_write(struct syna_tcm_hcd *tcm_hcd, unsigned char *data,
+		unsigned int length)
+{
+	int retval;
+	unsigned int attempt;
+	struct i2c_msg msg;
+	struct i2c_client *i2c = to_i2c_client(tcm_hcd->pdev->dev.parent);
+
+	mutex_lock(&tcm_hcd->io_ctrl_mutex);
+
+	msg.addr = i2c->addr;
+	msg.flags = 0;
+	msg.len = length;
+	msg.buf = data;
+
+	for (attempt = 0; attempt < XFER_ATTEMPTS; attempt++) {
+		if (i2c_transfer(i2c->adapter, &msg, 1) == 1) {
+			retval = length;
+			goto exit;
+		}
+		LOGE(&i2c->dev,
+				"Transfer attempt %d failed\n",
+				attempt + 1);
+
+		if (attempt + 1 == XFER_ATTEMPTS) {
+			retval = -EIO;
+			goto exit;
+		}
+
+		msleep(20);
+	}
+
+exit:
+	mutex_unlock(&tcm_hcd->io_ctrl_mutex);
+
+	return retval;
+}
+
 static int syna_tcm_i2c_probe(struct i2c_client *i2c,
 		const struct i2c_device_id *dev_id)
 {
 	int retval;
-	struct device_node *dt = i2c->dev.of_node;
+	struct device_node *dp = i2c->dev.of_node;
 
-	if (syna_tcm_check_dt(dt)) {
-		if (!syna_tcm_check_default_tp(dt, "qcom,i2c-touch-active"))
-			retval = -EPROBE_DEFER;
-		else
-			retval = -ENODEV;
+	if (dp) {
+		if (check_dt(dp)) {
+			if (!check_default_tp(dp, "qcom,i2c-touch-active")) {
+				msleep(100);
+				if (panel_retry_cnt++ < SYNA_TCM_PANEL_WAIT_RETRY) {
+					retval = -EPROBE_DEFER;
+				} else {
+					retval = -ENODEV;
+				}
+			} else
+				retval = -ENODEV;
 
-		return retval;
+			return retval;
+		}
 	}
 
 	syna_tcm_i2c_device = platform_device_alloc(PLATFORM_DRIVER_NAME, 0);
@@ -432,11 +516,7 @@ static int syna_tcm_i2c_probe(struct i2c_client *i2c,
 				"Failed to allocate memory for board data\n");
 		return -ENOMEM;
 	}
-	retval = parse_dt(&i2c->dev, hw_if.bdata);
-	if (retval < 0) {
-		LOGE(&i2c->dev, "Failed to parse dt\n");
-		return retval;
-	}
+	parse_dt(&i2c->dev, hw_if.bdata);
 #else
 	hw_if.bdata = i2c->dev.platform_data;
 #endif
@@ -478,7 +558,7 @@ static const struct i2c_device_id syna_tcm_id_table[] = {
 MODULE_DEVICE_TABLE(i2c, syna_tcm_id_table);
 
 #ifdef CONFIG_OF
-static const struct of_device_id syna_tcm_of_match_table[] = {
+static struct of_device_id syna_tcm_of_match_table[] = {
 	{
 		.compatible = "synaptics,tcm-i2c",
 	},
@@ -511,6 +591,8 @@ void syna_tcm_bus_exit(void)
 	kfree(buf);
 
 	i2c_del_driver(&syna_tcm_i2c_driver);
+
+	return;
 }
 EXPORT_SYMBOL(syna_tcm_bus_exit);
 

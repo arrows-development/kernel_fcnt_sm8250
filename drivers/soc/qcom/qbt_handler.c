@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
@@ -172,6 +175,8 @@ static void qbt_filter_touch_event(struct touch_event *evt)
 	mutex_lock(&drvdata->fd_events_mutex);
 	switch (evt->type) {
 	case 'D':
+		//printk("REC@REC@0 FFL_Touch_Down\n");
+		printk("REC@REC@0 FFL_Touch_Down, timestamp:%lu\n", (unsigned long)ktime_to_ms(ktime_get_raw()));
 	case 'U':
 		qbt_add_touch_event(evt);
 		break;
@@ -803,6 +808,12 @@ static void qbt_gpio_work_func(struct work_struct *work)
 	state = (__gpio_get_value(drvdata->fd_gpio.gpio) ?
 			QBT_EVENT_FINGER_DOWN : QBT_EVENT_FINGER_UP)
 			^ drvdata->fd_gpio.active_low;
+
+	if (state == QBT_EVENT_FINGER_DOWN) {
+		//printk("REC@REC@0 FFL_Touch_Down\n");
+		printk("REC@REC@0 FFL_Touch_Down, timestamp:%lu\n", (unsigned long)ktime_to_ms(ktime_get_raw()));
+
+	}
 
 	qbt_fd_report_event(drvdata, state);
 	pm_relax(drvdata->dev);

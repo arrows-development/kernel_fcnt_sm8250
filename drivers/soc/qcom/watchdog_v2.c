@@ -30,6 +30,9 @@
 #include <linux/dma-mapping.h>
 #include <linux/sched/clock.h>
 #include <linux/cpumask.h>
+
+#include <linux/pstore.h>
+
 #include <uapi/linux/sched/types.h>
 #ifdef CONFIG_QCOM_INITIAL_LOGBUF
 #include <linux/kallsyms.h>
@@ -751,6 +754,8 @@ static irqreturn_t wdog_bark_handler(int irq, void *dev_id)
 	struct msm_watchdog_data *wdog_dd = (struct msm_watchdog_data *)dev_id;
 	unsigned long nanosec_rem;
 	unsigned long long t = sched_clock();
+
+	pstore_write_summary(SMR_WDT_BARK_NOW);
 
 	nanosec_rem = do_div(t, 1000000000);
 	dev_info(wdog_dd->dev, "Watchdog bark! Now = %lu.%06lu\n",

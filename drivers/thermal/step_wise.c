@@ -1,6 +1,7 @@
 /*
  *  step_wise.c - A step-by-step Thermal throttling governor
  *
+ *  (C) 2021 FCNT LIMITED
  *  Copyright (C) 2012 Intel Corp
  *  Copyright (C) 2012 Durgadoss R <durgadoss.r@intel.com>
  *
@@ -188,6 +189,13 @@ static void thermal_zone_trip_update(struct thermal_zone_device *tz, int trip)
 
 		if (instance->initialized && old_target == instance->target)
 			continue;
+
+		if (old_target != instance->target)
+			dev_info(&instance->tz->device,
+				"%s temp=%d Trip%d[type=%d,temp=%d]:trend=%d,throttle=%d "
+				"cooling_device%d %s old_target=%d, target=%d\n",
+				instance->tz->type, instance->tz->temperature, trip, trip_type, trip_temp, trend, throttle,
+				instance->cdev->id, instance->cdev->type, old_target, (int)instance->target);
 
 		if (!instance->initialized) {
 			if (instance->target != THERMAL_NO_TARGET) {

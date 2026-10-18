@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * Copyright (C) 2010-2011 Canonical Ltd <jeremy.kerr@canonical.com>
  * Copyright (C) 2011-2012 Linaro Ltd <mturquette@linaro.org>
@@ -28,6 +31,8 @@
 #include <linux/of_platform.h>
 #include <linux/pm_opp.h>
 #include <linux/regulator/consumer.h>
+
+#include <linux/switch_logout.h>
 
 #include "clk.h"
 
@@ -4067,6 +4072,33 @@ void clock_debug_print_enabled(void)
 {
 }
 #endif
+
+#ifdef CONFIG_DEBUG_FS
+void clk_switch_dump(void)
+{
+	struct seq_file *s;
+
+	s = switch_print_seq_alloc(CLK_SWITCH_DUMP_SIZE);
+
+	if (!s)
+		return;
+
+	s->private = &all_lists;
+	clk_summary_show(s, NULL);
+
+	switch_print_seq_kmsg(s);
+
+	switch_print_seq_free(s);
+
+	return;
+}
+#else	/* DEBUG_FS */
+void clk_switch_dump(void)
+{
+	return;
+}
+#endif	/* DEBUG_FS */
+EXPORT_SYMBOL_GPL(clk_switch_dump);
 
 /**
  * __clk_core_init - initialize the data structures in a struct clk_core

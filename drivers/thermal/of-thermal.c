@@ -2,6 +2,7 @@
 /*
  *  of-thermal.c - Generic Thermal Management device tree support.
  *
+ *  (C) 2021 FCNT LIMITED
  *  Copyright (C) 2013 Texas Instruments
  *  Copyright (C) 2013 Eduardo Valentin <eduardo.valentin@ti.com>
  */
@@ -128,16 +129,30 @@ static int of_thermal_aggregate_trip_types(struct thermal_zone_device *tz,
 
 /***   DT thermal zone device callbacks   ***/
 
+#define THERMAL_REC_LINE_MAX 256
+#define THERMAL_REC_LEAST_INTERVAL_MSEC (3 * 60 * 1000)
+static unsigned long thermal_rec_ts = INITIAL_JIFFIES;
+
 static int virt_sensor_read_temp(void *data, int *val)
 {
 	struct virtual_sensor *sens = data;
 	int idx, temp = 0, ret = 0;
+	char thermal_log[THERMAL_REC_LINE_MAX] = {0};
+	ssize_t len = 0;
+	bool timeout = false;
+
+	if (time_after(jiffies, thermal_rec_ts + msecs_to_jiffies(THERMAL_REC_LEAST_INTERVAL_MSEC)))
+		timeout = true;
 
 	for (idx = 0; idx < sens->num_sensors; idx++) {
 		int sens_temp = 0;
 
 		ret = thermal_zone_get_temp(sens->tz[idx], &sens_temp);
 		if (ret) {
+			if (len != 0) {
+				printk(KERN_INFO "REC@TEM@39 thermal_zone%d %s\n", sens->virt_tz->id, thermal_log);
+				thermal_rec_ts = jiffies;
+			}
 			pr_err("virt zone: sensor[%s] read error:%d\n",
 				sens->tz[idx]->type, ret);
 			return ret;
@@ -160,6 +175,9 @@ static int virt_sensor_read_temp(void *data, int *val)
 				temp = INT_MAX;
 			if (sens_temp < temp)
 				temp = sens_temp;
+			if (timeout)
+				len += snprintf(thermal_log + len, THERMAL_REC_LINE_MAX - len,
+					" %s:%d", sens->tz[idx]->type, sens_temp);
 			break;
 		default:
 			break;
@@ -170,6 +188,10 @@ static int virt_sensor_read_temp(void *data, int *val)
 
 	sens->last_reading = *val = temp;
 
+	if (len != 0) {
+		printk(KERN_INFO "REC@TEM@39 thermal_zone%d %s\n", sens->virt_tz->id, thermal_log);
+		thermal_rec_ts = jiffies;
+	}
 	return 0;
 }
 

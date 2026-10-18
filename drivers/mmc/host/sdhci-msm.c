@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
@@ -169,6 +172,7 @@
 #define NUM_TUNING_PHASES		16
 #define MAX_DRV_TYPES_SUPPORTED_HS200	4
 #define MSM_AUTOSUSPEND_DELAY_MS 100
+#define MSM_MMC_VDD_DATA_OFF_TIME	1000 /* msecs */
 
 #define RCLK_TOGGLE 0x2
 
@@ -369,6 +373,14 @@ enum dll_init_context {
 
 static unsigned int sdhci_msm_get_sup_clk_rate(struct sdhci_host *host,
 						u32 req_clk);
+
+static int sdhci_msm_get_host_type(struct sdhci_host *host)
+{
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct sdhci_msm_host *msm_host = pltfm_host->priv;
+
+	return msm_host->pdata->host_type;
+}
 
 /* MSM platform specific tuning */
 static inline int msm_dll_poll_ck_out_en(struct sdhci_host *host,
@@ -1837,12 +1849,17 @@ static int sdhci_msm_dt_parse_vreg_info(struct device *dev,
 	snprintf(prop_name, MAX_PROP_SIZE,
 			"qcom,%s-voltage-level", vreg_name);
 	prop = of_get_property(np, prop_name, &len);
-	if (!prop || (len != (2 * sizeof(__be32)))) {
-		dev_warn(dev, "%s %s property\n",
-			prop ? "invalid format" : "no", prop_name);
-	} else {
+	if (prop && (len == (2 * sizeof(__be32)))) {
 		vreg->low_vol_level = be32_to_cpup(&prop[0]);
 		vreg->high_vol_level = be32_to_cpup(&prop[1]);
+		vreg->middle_vol_level = 0;
+	}else if (prop && (len == (3 * sizeof(__be32)))) {
+		vreg->low_vol_level = be32_to_cpup(&prop[0]);
+		vreg->high_vol_level = be32_to_cpup(&prop[1]);
+		vreg->middle_vol_level = be32_to_cpup(&prop[2]);
+	} else {
+		dev_warn(dev, "%s %s property\n",
+			prop ? "invalid format" : "no", prop_name);
 	}
 
 	snprintf(prop_name, MAX_PROP_SIZE,
@@ -2269,6 +2286,13 @@ struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 	pdata->status_gpio = of_get_named_gpio_flags(np, "cd-gpios", 0, &flags);
 	if (gpio_is_valid(pdata->status_gpio) && !(flags & OF_GPIO_ACTIVE_LOW))
 		pdata->caps2 |= MMC_CAP2_CD_ACTIVE_HIGH;
+
+	if (of_get_property(np, "fcnt,is-sdio", NULL)) 
+		pdata->host_type = HOST_TYPE_SDIO;
+	else if (of_get_property(np, "fcnt,is-sd", NULL)) 
+		pdata->host_type = HOST_TYPE_SD;
+	else
+		pdata->host_type = HOST_TYPE_MMC;
 
 	of_property_read_u32(np, "qcom,bus-width", &bus_width);
 	if (bus_width == 8)
@@ -2836,6 +2860,20 @@ static int sdhci_msm_vreg_enable(struct sdhci_msm_reg_data *vreg)
 		return ret;
 
 	if (!vreg->is_enabled) {
+		if(vreg->middle_vol_level) {
+			/* Set middle voltage level */
+			ret = sdhci_msm_vreg_set_voltage(vreg, vreg->middle_vol_level,
+							vreg->middle_vol_level);
+			if (ret)
+				return ret;
+
+			ret = regulator_enable(vreg->reg);
+			if (ret) {
+				pr_err("%s: regulator_enable(%s) middle failed. ret=%d\n",
+						__func__, vreg->name, ret);
+				return ret;
+			}
+		}
 		/* Set voltage level */
 		ret = sdhci_msm_vreg_set_voltage(vreg, vreg->low_vol_level,
 						vreg->high_vol_level);
@@ -2858,6 +2896,14 @@ static int sdhci_msm_vreg_disable(struct sdhci_msm_reg_data *vreg)
 
 	/* Never disable regulator marked as always_on */
 	if (vreg->is_enabled && !vreg->is_always_on) {
+		if(vreg->middle_vol_level) {
+			ret = regulator_disable(vreg->reg);
+			if (ret) {
+				pr_err("%s: regulator_disable(%s) middle failed. ret=%d\n",
+					__func__, vreg->name, ret);
+				goto out;
+			}
+		}
 		ret = regulator_disable(vreg->reg);
 		if (ret) {
 			pr_err("%s: regulator_disable(%s) failed. ret=%d\n",
@@ -2893,12 +2939,50 @@ static int sdhci_msm_setup_vreg(struct sdhci_msm_pltfm_data *pdata,
 	int ret = 0, i;
 	struct sdhci_msm_slot_reg_data *curr_slot;
 	struct sdhci_msm_reg_data *vreg_table[2];
+	struct timespec now_ts;
+	struct timespec end_ts;
+	struct timespec sleep_ts;
+	int sleep_ms;
+	struct sdhci_msm_host *msm_host = pdata->phost;
 
 	curr_slot = pdata->vreg_data;
 	if (!curr_slot) {
 		pr_debug("%s: vreg info unavailable,assuming the slot is powered by always on domain\n",
 			 __func__);
 		goto out;
+	}
+
+	if (msm_host->pdata->host_type == HOST_TYPE_SD) {
+		if ((enable) && (!curr_slot->vdd_data->is_enabled)) {
+			getnstimeofday(&now_ts);
+			end_ts = msm_host->vdd_off_start_ts;
+			timespec_add_ns(&end_ts, MSM_MMC_VDD_DATA_OFF_TIME * NSEC_PER_MSEC);
+			pr_debug("%s: vdd_data off->on. start_ts=%ld.%ld now_ts=%ld.%ld end_ts=%ld.%ld\n",
+				mmc_hostname(msm_host->mmc),
+				msm_host->vdd_off_start_ts.tv_sec, msm_host->vdd_off_start_ts.tv_nsec,
+				now_ts.tv_sec, now_ts.tv_nsec,
+				end_ts.tv_sec, end_ts.tv_nsec);
+
+			if ((msm_host->vdd_off_start_ts.tv_sec == 0) && (msm_host->vdd_off_start_ts.tv_nsec == 0)) { /* init on? */
+				pr_debug("%s: init skip\n", mmc_hostname(msm_host->mmc));
+			} else if (timespec_compare(&msm_host->vdd_off_start_ts, &now_ts) > 0) { /* future time? */
+				pr_err("%s: future time\n", mmc_hostname(msm_host->mmc));
+				msleep(MSM_MMC_VDD_DATA_OFF_TIME);
+			} else if (timespec_compare(&end_ts, &now_ts) > 0) { /* need to wait? */
+				sleep_ts = timespec_sub(end_ts, now_ts);
+				sleep_ms = sleep_ts.tv_sec * MSEC_PER_SEC + DIV_ROUND_UP(sleep_ts.tv_nsec, NSEC_PER_MSEC);
+				pr_debug("%s: wait start. sleep_ts=%ld.%ld sleep_ms=%d\n",
+					mmc_hostname(msm_host->mmc), sleep_ts.tv_sec, sleep_ts.tv_nsec, sleep_ms);
+				msleep(sleep_ms);
+				pr_debug("%s: wait end\n", mmc_hostname(msm_host->mmc));
+			} else { /* time over? */
+				pr_debug("%s: non wait\n", mmc_hostname(msm_host->mmc));
+			}
+		} else if ((!enable) && (curr_slot->vdd_data->is_enabled)) {
+			getnstimeofday(&msm_host->vdd_off_start_ts);
+			pr_debug("%s: vdd_data on->off. start_ts=%ld.%ld\n",
+				mmc_hostname(msm_host->mmc), msm_host->vdd_off_start_ts.tv_sec, msm_host->vdd_off_start_ts.tv_nsec);
+		}
 	}
 
 	vreg_table[0] = curr_slot->vdd_data;
@@ -3167,6 +3251,9 @@ static void sdhci_msm_vbias_bypass_wa(struct sdhci_host *host)
 				msm_host_offset->CORE_VENDOR_SPEC);
 }
 
+/* temp add */
+static bool vreg_disable_skip = false;
+
 static irqreturn_t sdhci_msm_pwr_irq(int irq, void *data)
 {
 	struct sdhci_host *host = (struct sdhci_host *)data;
@@ -3217,9 +3304,16 @@ static irqreturn_t sdhci_msm_pwr_irq(int irq, void *data)
 		io_level = REQ_IO_HIGH;
 	}
 	if (irq_status & CORE_PWRCTL_BUS_OFF) {
+/* temp mod start */
 		if (msm_host->pltfm_init_done)
 			ret = sdhci_msm_setup_vreg(msm_host->pdata,
 					false, false);
+		else {
+			vreg_disable_skip = true;
+			pr_info("%s: vreg disable skip\n",
+				mmc_hostname(msm_host->mmc));
+		}
+/* temp mod end */
 		if (!ret) {
 			ret = sdhci_msm_setup_pins(msm_host->pdata, false);
 			ret |= sdhci_msm_set_vdd_io_vol(msm_host->pdata,
@@ -5134,6 +5228,7 @@ static struct sdhci_ops sdhci_msm_ops = {
 	.enter_dbg_mode = sdhci_msm_enter_dbg_mode,
 	.exit_dbg_mode = sdhci_msm_exit_dbg_mode,
 	.hw_reset = sdhci_msm_hw_reset,
+	.get_host_type = sdhci_msm_get_host_type,						
 };
 
 static void sdhci_set_default_hw_caps(struct sdhci_msm_host *msm_host,
@@ -5426,6 +5521,7 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 			dev_err(&pdev->dev, "DT parsing error\n");
 			goto pltfm_free;
 		}
+		msm_host->pdata->phost = msm_host;
 	} else {
 		dev_err(&pdev->dev, "No device tree node\n");
 		goto pltfm_free;
@@ -5526,6 +5622,8 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 
 	sdhci_msm_bus_voting(host, 1);
 
+	msm_host->vdd_off_start_ts.tv_sec = 0;
+	msm_host->vdd_off_start_ts.tv_nsec = 0;
 	/* Setup regulators */
 	ret = sdhci_msm_vreg_init(&pdev->dev, msm_host->pdata, true);
 	if (ret) {
@@ -5818,6 +5916,16 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	pm_runtime_enable(&pdev->dev);
 	pm_runtime_set_autosuspend_delay(&pdev->dev, MSM_AUTOSUSPEND_DELAY_MS);
 	pm_runtime_use_autosuspend(&pdev->dev);
+
+/* temp add start */
+	if (vreg_disable_skip) {
+		ret = sdhci_msm_setup_vreg(msm_host->pdata,
+			false, false);
+		vreg_disable_skip = false;
+		if (ret)
+			goto remove_host;
+	}
+/* temp add end */
 
 	msm_host->msm_bus_vote.max_bus_bw.show = show_sdhci_max_bus_bw;
 	msm_host->msm_bus_vote.max_bus_bw.store = store_sdhci_max_bus_bw;

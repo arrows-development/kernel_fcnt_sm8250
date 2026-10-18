@@ -2,7 +2,15 @@
 #
 # Makefile for the kernel software RAID and LVM drivers.
 #
-
+ifeq ($(FJ_PRODUCT_RELEASE),1)
+KBUILD_CFLAGS += -DFJ_PRODUCT_RELEASE
+endif
+ifeq ($(FJFEAT_AIRMONKEY),1)
+KBUILD_CFLAGS += -DFJFEAT_AIRMONKEY
+endif
+ifeq ($(FJSEC_BLDFLG),1)
+KBUILD_CFLAGS += -DFJSEC_BLDFLG
+endif
 dm-mod-y	+= dm.o dm-table.o dm-target.o dm-linear.o dm-stripe.o \
 		   dm-ioctl.o dm-io.o dm-kcopyd.o dm-sysfs.o dm-stats.o \
 		   dm-rq.o

@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/include/linux/mmc/core.h
  *
@@ -198,5 +201,6 @@ int mmc_hw_reset(struct mmc_host *host);
 int mmc_sw_reset(struct mmc_host *host);
 void mmc_set_data_timeout(struct mmc_data *data, const struct mmc_card *card);
 extern void mmc_flush_detect_work(struct mmc_host *host);
-
+unsigned int mmc_get_timeout_exponent(struct mmc_data *data, const struct mmc_card *card);
+void mmc_countup_exponent(struct mmc_data *data, struct mmc_card *card);
 #endif /* LINUX_MMC_CORE_H */

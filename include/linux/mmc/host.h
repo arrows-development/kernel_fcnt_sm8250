@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/include/linux/mmc/host.h
  *
@@ -169,6 +172,7 @@ struct mmc_host_ops {
 	 *   or a negative errno value when something bad happened
 	 */
 	int	(*get_cd)(struct mmc_host *host);
+	int	(*get_host_type)(struct mmc_host *host);  
 
 	void	(*enable_sdio_irq)(struct mmc_host *host, int enable);
 	void	(*ack_sdio_irq)(struct mmc_host *host);
@@ -702,6 +706,8 @@ void mmc_command_done(struct mmc_host *host, struct mmc_request *mrq);
 
 void mmc_cqe_request_done(struct mmc_host *host, struct mmc_request *mrq);
 
+extern void mmc_down_speed_mode(struct mmc_host *host);	
+
 /*
  * May be called from host driver's system/runtime suspend/resume callbacks,
  * to know if SDIO IRQs has been claimed.
@@ -819,5 +825,20 @@ static inline enum dma_data_direction mmc_get_dma_dir(struct mmc_data *data)
 
 int mmc_send_tuning(struct mmc_host *host, u32 opcode, int *cmd_error);
 int mmc_abort_tuning(struct mmc_host *host, u32 opcode);
+
+#define HOST_TYPE_MMC		(1 << 0)		/* MMC  */
+#define HOST_TYPE_SD		(1 << 1)		/* SD   */
+#define HOST_TYPE_SDIO		(1 << 2)		/* SDIO */
+static inline int mmc_host_get_type(struct mmc_host *host)
+{
+	int ret = 0;
+
+	if (!host->ops->get_host_type)
+		pr_err(" %pF -> %s() [%s] null access\n", __builtin_return_address(0), __func__, mmc_hostname(host));
+	else
+		ret = host->ops->get_host_type(host);
+
+	return ret;
+}
 
 #endif /* LINUX_MMC_HOST_H */

@@ -1,9 +1,13 @@
 /*
  * Synaptics TCM touchscreen driver
  *
- * Copyright (C) 2017-2019 Synaptics Incorporated. All rights reserved.
+ * Copyright (C) 2017-2018 Synaptics Incorporated. All rights reserved.
  *
- * Copyright (C) 2017-2019 Scott Lin <scott.lin@tw.synaptics.com>
+ * Copyright (C) 2017-2018 Scott Lin <scott.lin@tw.synaptics.com>
+ * Copyright (C) 2018-2019 Ian Su <ian.su@tw.synaptics.com>
+ * Copyright (C) 2018-2019 Joey Zhou <joey.zhou@synaptics.com>
+ * Copyright (C) 2018-2019 Yuehao Qiu <yuehao.qiu@synaptics.com>
+ * Copyright (C) 2018-2019 Aaron Chen <aaron.chen@tw.synaptics.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -65,9 +69,10 @@ exit: \
 }
 
 enum test_code {
-	TEST_TRX_TRX_SHORTS = 0,
-	TEST_TRX_SENSOR_OPENS = 1,
-	TEST_TRX_GROUND_SHORTS = 2,
+	TEST_NOT_IMPLEMENTED = 0,
+	TEST_TRX_TRX_SHORTS = 1,
+	TEST_TRX_SENSOR_OPENS = 2,
+	TEST_TRX_GROUND_SHORTS = 3,
 	TEST_DYNAMIC_RANGE = 7,
 	TEST_OPEN_SHORT_DETECTOR = 8,
 	TEST_NOISE = 10,
@@ -126,22 +131,22 @@ static int testing_lockdown(void);
 
 static int testing_trx(enum test_code test_code);
 
-SHOW_PROTOTYPE(testing, dynamic_range);
-SHOW_PROTOTYPE(testing, dynamic_range_lpwg);
-SHOW_PROTOTYPE(testing, dynamic_range_doze);
-SHOW_PROTOTYPE(testing, noise);
-SHOW_PROTOTYPE(testing, noise_lpwg);
-SHOW_PROTOTYPE(testing, noise_doze);
-SHOW_PROTOTYPE(testing, open_short_detector);
-SHOW_PROTOTYPE(testing, pt11);
-SHOW_PROTOTYPE(testing, pt12);
-SHOW_PROTOTYPE(testing, pt13);
-SHOW_PROTOTYPE(testing, reset_open);
-SHOW_PROTOTYPE(testing, lockdown);
-SHOW_PROTOTYPE(testing, trx_trx_shorts);
-SHOW_PROTOTYPE(testing, trx_sensor_opens);
-SHOW_PROTOTYPE(testing, trx_ground_shorts);
-SHOW_PROTOTYPE(testing, size);
+SHOW_PROTOTYPE(testing, dynamic_range)
+SHOW_PROTOTYPE(testing, dynamic_range_lpwg)
+SHOW_PROTOTYPE(testing, dynamic_range_doze)
+SHOW_PROTOTYPE(testing, noise)
+SHOW_PROTOTYPE(testing, noise_lpwg)
+SHOW_PROTOTYPE(testing, noise_doze)
+SHOW_PROTOTYPE(testing, open_short_detector)
+SHOW_PROTOTYPE(testing, pt11)
+SHOW_PROTOTYPE(testing, pt12)
+SHOW_PROTOTYPE(testing, pt13)
+SHOW_PROTOTYPE(testing, reset_open)
+SHOW_PROTOTYPE(testing, lockdown)
+SHOW_PROTOTYPE(testing, trx_trx_shorts)
+SHOW_PROTOTYPE(testing, trx_sensor_opens)
+SHOW_PROTOTYPE(testing, trx_ground_shorts)
+SHOW_PROTOTYPE(testing, size)
 
 static struct device_attribute *attrs[] = {
 	ATTRIFY(dynamic_range),
@@ -169,7 +174,7 @@ static ssize_t testing_sysfs_data_show(struct file *data_file,
 static struct bin_attribute bin_attr = {
 	.attr = {
 		.name = "data",
-		.mode = 0444,
+		.mode = S_IRUGO,
 	},
 	.size = 0,
 	.read = testing_sysfs_data_show,
@@ -334,17 +339,18 @@ static int testing_run_prod_test_item(enum test_code test_code)
 	struct syna_tcm_hcd *tcm_hcd = testing_hcd->tcm_hcd;
 
 	if (tcm_hcd->features.dual_firmware &&
-			tcm_hcd->id_info.mode != MODE_PRODUCTION_TEST) {
+			tcm_hcd->id_info.mode != MODE_PRODUCTIONTEST_FIRMWARE) {
 		retval = tcm_hcd->switch_mode(tcm_hcd, FW_MODE_PRODUCTION_TEST);
 		if (retval < 0) {
 			LOGE(tcm_hcd->pdev->dev.parent,
 					"Failed to run production test firmware\n");
 			return retval;
 		}
-	} else if (tcm_hcd->id_info.mode != MODE_APPLICATION ||
+	} else if (IS_NOT_FW_MODE(tcm_hcd->id_info.mode) ||
 			tcm_hcd->app_status != APP_STATUS_OK) {
 		LOGE(tcm_hcd->pdev->dev.parent,
-				"Application firmware not running\n");
+				"Identifying mode = 0x%02x\n",
+				tcm_hcd->id_info.mode);
 		return -ENODEV;
 	}
 
@@ -400,7 +406,11 @@ static int testing_collect_reports(enum report_type report_type,
 	testing_hcd->report_type = report_type;
 	testing_hcd->num_of_reports = num_of_reports;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0))
 	reinit_completion(&report_complete);
+#else
+	INIT_COMPLETION(report_complete);
+#endif
 
 	LOCK_BUFFER(testing_hcd->out);
 
@@ -512,6 +522,8 @@ static void testing_get_frame_size_words(unsigned int *size, bool image_only)
 			*size += rows + cols;
 		*size += buttons;
 	}
+
+	return;
 }
 
 static void testing_doze_frame_output(unsigned int rows, unsigned int cols)
@@ -573,6 +585,8 @@ static void testing_doze_frame_output(unsigned int rows, unsigned int cols)
 	testing_hcd->output.data_length = output_size;
 
 	UNLOCK_BUFFER(testing_hcd->output);
+
+	return;
 }
 
 static void testing_standard_frame_output(bool image_only)
@@ -643,6 +657,8 @@ static void testing_standard_frame_output(bool image_only)
 	testing_hcd->output.data_length = output_size;
 
 	UNLOCK_BUFFER(testing_hcd->output);
+
+	return;
 }
 
 static int testing_dynamic_range_doze(void)
@@ -689,8 +705,8 @@ static int testing_dynamic_range_doze(void)
 
 	rows = data_size / cols;
 
-	limits_rows = ARRAY_SIZE(drt_hi_limits);
-	limits_cols = ARRAY_SIZE(drt_hi_limits[0]);
+	limits_rows = sizeof(drt_hi_limits) / sizeof(drt_hi_limits[0]);
+	limits_cols = sizeof(drt_hi_limits[0]) / sizeof(drt_hi_limits[0][0]);
 
 	if (rows > limits_rows || cols > limits_cols) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -700,8 +716,8 @@ static int testing_dynamic_range_doze(void)
 		goto exit;
 	}
 
-	limits_rows = ARRAY_SIZE(drt_lo_limits);
-	limits_cols = ARRAY_SIZE(drt_lo_limits[0]);
+	limits_rows = sizeof(drt_lo_limits) / sizeof(drt_lo_limits[0]);
+	limits_cols = sizeof(drt_lo_limits[0]) / sizeof(drt_lo_limits[0][0]);
 
 	if (rows > limits_rows || cols > limits_cols) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -735,7 +751,7 @@ static int testing_dynamic_range_doze(void)
 
 exit:
 	if (tcm_hcd->features.dual_firmware) {
-		if (tcm_hcd->reset(tcm_hcd, false, true) < 0) {
+		if (tcm_hcd->reset(tcm_hcd) < 0) {
 			LOGE(tcm_hcd->pdev->dev.parent,
 					"Failed to do reset\n");
 		}
@@ -817,8 +833,8 @@ static int testing_dynamic_range(void)
 		goto exit;
 	}
 
-	limits_rows = ARRAY_SIZE(drt_hi_limits);
-	limits_cols = ARRAY_SIZE(drt_hi_limits[0]);
+	limits_rows = sizeof(drt_hi_limits) / sizeof(drt_hi_limits[0]);
+	limits_cols = sizeof(drt_hi_limits[0]) / sizeof(drt_hi_limits[0][0]);
 
 	if (rows > limits_rows || cols > limits_cols) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -828,8 +844,8 @@ static int testing_dynamic_range(void)
 		goto exit;
 	}
 
-	limits_rows = ARRAY_SIZE(drt_lo_limits);
-	limits_cols = ARRAY_SIZE(drt_lo_limits[0]);
+	limits_rows = sizeof(drt_lo_limits) / sizeof(drt_lo_limits[0]);
+	limits_cols = sizeof(drt_lo_limits[0]) / sizeof(drt_lo_limits[0][0]);
 
 	if (rows > limits_rows || cols > limits_cols) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -863,7 +879,7 @@ static int testing_dynamic_range(void)
 
 exit:
 	if (tcm_hcd->features.dual_firmware) {
-		if (tcm_hcd->reset(tcm_hcd, false, true) < 0) {
+		if (tcm_hcd->reset(tcm_hcd) < 0) {
 			LOGE(tcm_hcd->pdev->dev.parent,
 					"Failed to do reset\n");
 		}
@@ -916,8 +932,8 @@ static int testing_noise_doze(void)
 
 	rows = data_size / cols;
 
-	limits_rows = ARRAY_SIZE(noise_limits);
-	limits_cols = ARRAY_SIZE(noise_limits[0]);
+	limits_rows = sizeof(noise_limits) / sizeof(noise_limits[0]);
+	limits_cols = sizeof(noise_limits[0]) / sizeof(noise_limits[0][0]);
 
 	if (rows > limits_rows || cols > limits_cols) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -950,7 +966,7 @@ static int testing_noise_doze(void)
 
 exit:
 	if (tcm_hcd->features.dual_firmware) {
-		if (tcm_hcd->reset(tcm_hcd, false, true) < 0) {
+		if (tcm_hcd->reset(tcm_hcd) < 0) {
 			LOGE(tcm_hcd->pdev->dev.parent,
 					"Failed to do reset\n");
 		}
@@ -1032,8 +1048,8 @@ static int testing_noise(void)
 		goto exit;
 	}
 
-	limits_rows = ARRAY_SIZE(noise_limits);
-	limits_cols = ARRAY_SIZE(noise_limits[0]);
+	limits_rows = sizeof(noise_limits) / sizeof(noise_limits[0]);
+	limits_cols = sizeof(noise_limits[0]) / sizeof(noise_limits[0][0]);
 
 	if (rows > limits_rows || cols > limits_cols) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -1066,7 +1082,7 @@ static int testing_noise(void)
 
 exit:
 	if (tcm_hcd->features.dual_firmware) {
-		if (tcm_hcd->reset(tcm_hcd, false, true) < 0) {
+		if (tcm_hcd->reset(tcm_hcd) < 0) {
 			LOGE(tcm_hcd->pdev->dev.parent,
 					"Failed to do reset\n");
 		}
@@ -1106,7 +1122,7 @@ static void testing_open_short_detector_output(void)
 			output_size);
 	if (retval < 0) {
 		LOGE(tcm_hcd->pdev->dev.parent,
-			"Failed to allocate memory for output.buf\n");
+				"Failed to allocate memory for testing_hcd->output.buf\n");
 		UNLOCK_BUFFER(testing_hcd->output);
 		return;
 	}
@@ -1147,6 +1163,8 @@ static void testing_open_short_detector_output(void)
 	testing_hcd->output.data_length = output_size;
 
 	UNLOCK_BUFFER(testing_hcd->output);
+
+	return;
 }
 
 static int testing_open_short_detector(void)
@@ -1229,7 +1247,7 @@ static int testing_open_short_detector(void)
 	retval = 0;
 
 exit:
-	if (tcm_hcd->reset(tcm_hcd, false, true) < 0) {
+	if (tcm_hcd->reset(tcm_hcd) < 0) {
 		LOGE(tcm_hcd->pdev->dev.parent,
 				"Failed to do reset\n");
 	}
@@ -1277,8 +1295,8 @@ static int testing_pt11(void)
 		goto exit;
 	}
 
-	limits_rows = ARRAY_SIZE(pt11_hi_limits);
-	limits_cols = ARRAY_SIZE(pt11_hi_limits[0]);
+	limits_rows = sizeof(pt11_hi_limits) / sizeof(pt11_hi_limits[0]);
+	limits_cols = sizeof(pt11_hi_limits[0]) / sizeof(pt11_hi_limits[0][0]);
 
 	if (rows > limits_rows || cols > limits_cols) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -1288,8 +1306,8 @@ static int testing_pt11(void)
 		goto exit;
 	}
 
-	limits_rows = ARRAY_SIZE(pt11_lo_limits);
-	limits_cols = ARRAY_SIZE(pt11_lo_limits[0]);
+	limits_rows = sizeof(pt11_lo_limits) / sizeof(pt11_lo_limits[0]);
+	limits_cols = sizeof(pt11_lo_limits[0]) / sizeof(pt11_lo_limits[0][0]);
 
 	if (rows > limits_rows || cols > limits_cols) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -1323,7 +1341,7 @@ static int testing_pt11(void)
 
 exit:
 	if (tcm_hcd->features.dual_firmware) {
-		if (tcm_hcd->reset(tcm_hcd, false, true) < 0) {
+		if (tcm_hcd->reset(tcm_hcd) < 0) {
 			LOGE(tcm_hcd->pdev->dev.parent,
 					"Failed to do reset\n");
 		}
@@ -1372,8 +1390,8 @@ static int testing_pt12(void)
 		goto exit;
 	}
 
-	limits_rows = ARRAY_SIZE(pt12_limits);
-	limits_cols = ARRAY_SIZE(pt12_limits[0]);
+	limits_rows = sizeof(pt12_limits) / sizeof(pt12_limits[0]);
+	limits_cols = sizeof(pt12_limits[0]) / sizeof(pt12_limits[0][0]);
 
 	if (rows > limits_rows || cols > limits_cols) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -1406,7 +1424,7 @@ static int testing_pt12(void)
 
 exit:
 	if (tcm_hcd->features.dual_firmware) {
-		if (tcm_hcd->reset(tcm_hcd, false, true) < 0) {
+		if (tcm_hcd->reset(tcm_hcd) < 0) {
 			LOGE(tcm_hcd->pdev->dev.parent,
 					"Failed to do reset\n");
 		}
@@ -1455,8 +1473,8 @@ static int testing_pt13(void)
 		goto exit;
 	}
 
-	limits_rows = ARRAY_SIZE(pt13_limits);
-	limits_cols = ARRAY_SIZE(pt13_limits[0]);
+	limits_rows = sizeof(pt13_limits) / sizeof(pt13_limits[0]);
+	limits_cols = sizeof(pt13_limits[0]) / sizeof(pt13_limits[0][0]);
 
 	if (rows > limits_rows || cols > limits_cols) {
 		LOGE(tcm_hcd->pdev->dev.parent,
@@ -1489,7 +1507,7 @@ static int testing_pt13(void)
 
 exit:
 	if (tcm_hcd->features.dual_firmware) {
-		if (tcm_hcd->reset(tcm_hcd, false, true) < 0) {
+		if (tcm_hcd->reset(tcm_hcd) < 0) {
 			LOGE(tcm_hcd->pdev->dev.parent,
 					"Failed to do reset\n");
 		}
@@ -1512,18 +1530,22 @@ static int testing_reset_open(void)
 
 	mutex_lock(&tcm_hcd->reset_mutex);
 
+#ifdef WATCHDOG_SW
 	tcm_hcd->update_watchdog(tcm_hcd, false);
+#endif
 
 	gpio_set_value(bdata->reset_gpio, bdata->reset_on_state);
 	msleep(bdata->reset_active_ms);
 	gpio_set_value(bdata->reset_gpio, !bdata->reset_on_state);
 	msleep(bdata->reset_delay_ms);
 
+#ifdef WATCHDOG_SW
 	tcm_hcd->update_watchdog(tcm_hcd, true);
+#endif
 
 	mutex_unlock(&tcm_hcd->reset_mutex);
 
-	if (tcm_hcd->id_info.mode == MODE_APPLICATION) {
+	if (tcm_hcd->id_info.mode == MODE_APPLICATION_FIRMWARE) {
 		retval = tcm_hcd->switch_mode(tcm_hcd, FW_MODE_BOOTLOADER);
 		if (retval < 0) {
 			LOGE(tcm_hcd->pdev->dev.parent,
@@ -1568,7 +1590,7 @@ static void testing_lockdown_output(void)
 			testing_hcd->resp.data_length);
 	if (retval < 0) {
 		LOGE(tcm_hcd->pdev->dev.parent,
-			"Failed to allocate memory for output.buf\n");
+				"Failed to allocate memory for testing_hcd->output.buf\n");
 		UNLOCK_BUFFER(testing_hcd->resp);
 		UNLOCK_BUFFER(testing_hcd->output);
 		return;
@@ -1591,6 +1613,8 @@ static void testing_lockdown_output(void)
 
 	UNLOCK_BUFFER(testing_hcd->resp);
 	UNLOCK_BUFFER(testing_hcd->output);
+
+	return;
 }
 
 static int testing_lockdown(void)
@@ -1657,7 +1681,7 @@ static void testing_trx_output(void)
 			testing_hcd->resp.data_length);
 	if (retval < 0) {
 		LOGE(tcm_hcd->pdev->dev.parent,
-			"Failed to allocate memory for output.buf\n");
+				"Failed to allocate memory for testing_hcd->output.buf\n");
 		UNLOCK_BUFFER(testing_hcd->resp);
 		UNLOCK_BUFFER(testing_hcd->output);
 		return;
@@ -1680,6 +1704,8 @@ static void testing_trx_output(void)
 
 	UNLOCK_BUFFER(testing_hcd->resp);
 	UNLOCK_BUFFER(testing_hcd->output);
+
+	return;
 }
 
 static int testing_trx(enum test_code test_code)
@@ -1727,7 +1753,7 @@ static int testing_trx(enum test_code test_code)
 
 exit:
 	if (tcm_hcd->features.dual_firmware) {
-		if (tcm_hcd->reset(tcm_hcd, false, true) < 0) {
+		if (tcm_hcd->reset(tcm_hcd) < 0) {
 			LOGE(tcm_hcd->pdev->dev.parent,
 					"Failed to do reset\n");
 		}
@@ -1753,7 +1779,7 @@ static void testing_report(void)
 				report_size * testing_hcd->num_of_reports);
 		if (retval < 0) {
 			LOGE(tcm_hcd->pdev->dev.parent,
-				"Failed to allocate memory for report.buf\n");
+					"Failed to allocate memory for testing_hcd->report.buf\n");
 			UNLOCK_BUFFER(testing_hcd->report);
 			return;
 		}
@@ -1782,6 +1808,8 @@ static void testing_report(void)
 
 	if (testing_hcd->report_index == testing_hcd->num_of_reports)
 		complete(&report_complete);
+
+	return;
 }
 
 static int testing_init(struct syna_tcm_hcd *tcm_hcd)
@@ -1883,7 +1911,7 @@ exit:
 	return 0;
 }
 
-static int testing_reset(struct syna_tcm_hcd *tcm_hcd)
+static int testing_reinit(struct syna_tcm_hcd *tcm_hcd)
 {
 	int retval;
 
@@ -1911,8 +1939,10 @@ static struct syna_tcm_module_cb testing_module = {
 	.init = testing_init,
 	.remove = testing_remove,
 	.syncbox = testing_syncbox,
+#ifdef REPORT_NOTIFIER
 	.asyncbox = NULL,
-	.reset = testing_reset,
+#endif
+	.reinit = testing_reinit,
 	.suspend = NULL,
 	.resume = NULL,
 	.early_suspend = NULL,
@@ -1928,6 +1958,8 @@ static void __exit testing_module_exit(void)
 	syna_tcm_add_module(&testing_module, false);
 
 	wait_for_completion(&testing_remove_complete);
+
+	return;
 }
 
 module_init(testing_module_init);

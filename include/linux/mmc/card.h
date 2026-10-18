@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/include/linux/mmc/card.h
  *
@@ -303,6 +306,12 @@ struct mmc_bkops_info {
 	u32  retry_counter;
 };
 
+struct rw_timeout_exponent_info {
+#define MMC_R_TIMEOUT_EXPONENT_MAX	(3)
+	unsigned int		read;
+	bool				r_enabled;
+};
+
 enum mmc_pon_type {
 	MMC_LONG_PON = 1,
 	MMC_SHRT_PON,
@@ -402,6 +411,8 @@ struct mmc_card {
 	struct notifier_block   reboot_notify;
 	enum mmc_pon_type	pon_type;
 	struct mmc_bkops_info bkops;
+	unsigned int		change_speed_uhs;	
+	struct rw_timeout_exponent_info	rw_exponent;
 };
 
 static inline bool mmc_large_sector(struct mmc_card *card)

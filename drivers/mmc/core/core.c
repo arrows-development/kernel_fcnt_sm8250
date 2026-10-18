@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+/* (C) 2021 FCNT LIMITED              */
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/drivers/mmc/core/core.c
  *
@@ -51,6 +54,7 @@
 #include "mmc_ops.h"
 #include "sd_ops.h"
 #include "sdio_ops.h"
+#include "cmdlog.h" 
 
 /* The max erase timeout, used when host->max_busy_timeout isn't specified */
 #define MMC_ERASE_TIMEOUT_MS	(60 * 1000) /* 60 s */
@@ -1022,6 +1026,8 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 	struct mmc_command *cmd = mrq->cmd;
 	int err = cmd->error;
 
+	MMC_PRINT_RESPONSE(host, mrq); 
+
 	if (host->clk_scaling.is_busy_started)
 		mmc_clk_scaling_stop_busy(host, true);
 
@@ -1038,6 +1044,23 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 		if (cmd->resp[0] & R1_SPI_ILLEGAL_COMMAND)
 			cmd->retries = 0;
 	}
+
+	
+	do {
+		if (!host->card)
+			break;
+		if (!mrq->data)
+			break;
+		if (!mrq->data->error)
+			break;
+		if (mmc_card_removed(host->card))
+			break;
+		if (cmd->opcode == MMC_SEND_TUNING_BLOCK_HS200 ||
+			cmd->opcode == MMC_SEND_TUNING_BLOCK)
+			break;
+		mmc_down_speed_mode(host);
+	} while(0);
+	
 
 	if (host->ongoing_mrq == mrq)
 		host->ongoing_mrq = NULL;
@@ -1227,7 +1250,22 @@ int mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
 	if (mmc_card_removed(host->card))
 		return -ENOMEDIUM;
 
+	if (host->card &&
+		mmc_card_sd(host->card)) {
+		if (mmc_card_readonly(host->card) &&
+			mrq->data &&
+			(mrq->data->flags & MMC_DATA_WRITE))
+			return -EROFS;
+
+		if (!(host->card->scr.cmds & SD_SCR_CMD23_SUPPORT) &&
+			(mrq->sbc && mrq->sbc->opcode == MMC_SET_BLOCK_COUNT)) {
+			pr_err("%s: sbc MMC_SET_BLOCK_COUNT disabled\n", mmc_hostname(host));
+			mrq->sbc = NULL;
+		}
+	}
+
 	mmc_mrq_pr_debug(host, mrq, false);
+	MMC_PRINT_CMDLOG(host, mrq); 
 
 	WARN_ON(!host->claimed);
 
@@ -1662,6 +1700,43 @@ void mmc_set_data_timeout(struct mmc_data *data, const struct mmc_card *card)
 	}
 }
 EXPORT_SYMBOL(mmc_set_data_timeout);
+
+unsigned int mmc_get_timeout_exponent(struct mmc_data *data, const struct mmc_card *card)
+{
+	if (!card || !data || !mmc_card_sd(card))
+		return 0;
+
+	if (card->rw_exponent.r_enabled && (data->flags & MMC_DATA_READ))
+		return card->rw_exponent.read;
+
+	return 0;
+}
+EXPORT_SYMBOL(mmc_get_timeout_exponent);
+
+void mmc_countup_exponent(struct mmc_data *data, struct mmc_card *card)
+{
+	if (!card || !data || !mmc_card_sd(card))
+		return;
+
+	if (data->flags & MMC_DATA_READ) {
+		if (card->rw_exponent.read < MMC_R_TIMEOUT_EXPONENT_MAX) {
+			card->rw_exponent.read++;
+			card->rw_exponent.r_enabled = true;
+			pr_err("%s: exponent r[%d]timeout_ns[%d]timeout_clks[%d]\n",
+				mmc_hostname(card->host),
+				card->rw_exponent.read,
+				data->timeout_ns,
+				data->timeout_clks);
+		} else if (card->rw_exponent.r_enabled) {
+			card->rw_exponent.r_enabled = false;
+			pr_err("%s: exponent r disable\n", mmc_hostname(card->host));
+			FJ_SD_REC_LOG("%s: SD card Broken: read fail\n",
+							mmc_hostname(card->host));
+		}
+	}
+	return;
+}
+EXPORT_SYMBOL(mmc_countup_exponent);
 
 /**
  *	mmc_align_data_size - pads a transfer size to a more optimal value
@@ -3756,6 +3831,15 @@ void mmc_stop_host(struct mmc_host *host)
 	mmc_power_off(host);
 	mmc_release_host(host);
 }
+
+void mmc_down_speed_mode(struct mmc_host *host)
+{
+	if (host->bus_ops && host->bus_ops->down_speed_mode)
+		host->bus_ops->down_speed_mode(host);
+
+	return;
+}
+EXPORT_SYMBOL(mmc_down_speed_mode);
 
 #ifdef CONFIG_PM_SLEEP
 /* Do the card removal on suspend if card is assumed removeable

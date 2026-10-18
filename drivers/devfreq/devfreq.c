@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * devfreq: Generic Dynamic Voltage and Frequency Scaling (DVFS) Framework
  *	    for Non-CPU Devices.
@@ -1530,6 +1533,73 @@ void devm_devfreq_unregister_opp_notifier(struct device *dev,
 			       devm_devfreq_dev_match, devfreq));
 }
 EXPORT_SYMBOL(devm_devfreq_unregister_opp_notifier);
+
+struct check_device_set_limit {
+	const char *dev_name;
+	int dev_name_len;
+	unsigned long max_freq;
+	unsigned long min_freq;
+};
+
+static int __devfreq_set_limit_freq_dev(struct device *dev, void *data)
+{
+	struct check_device_set_limit *ppar = data;
+	const char *target_name = dev_name(dev);
+	int ret = 0;
+
+	pr_debug("  - %s\n", target_name);
+	if (!strncmp(target_name, ppar->dev_name, ppar->dev_name_len)) {
+		struct devfreq *df = to_devfreq(dev);
+		mutex_lock(&df->event_lock);
+		mutex_lock(&df->lock);
+		if (ppar->max_freq) {
+			pr_debug("    set max:%lu->%lu\n", df->max_freq, ppar->max_freq);
+			df->max_freq = ppar->max_freq;
+		}
+		if (ppar->min_freq) {
+			pr_debug("    set min:%lu->%lu\n", df->min_freq, ppar->min_freq);
+			df->min_freq = ppar->min_freq;
+		}
+		ret = update_devfreq(df);
+		if (ret) {
+			/* error ignored because it does not recover */
+			pr_debug("    ignore error %d\n", ret);
+			ret = 0;
+		}
+		mutex_unlock(&df->lock);
+		mutex_unlock(&df->event_lock);
+	}
+
+	return ret;
+}
+
+int devfreq_set_limit_freq(const char *dev_name, unsigned long max_freq, unsigned long min_freq)
+{
+	int ret;
+	struct check_device_set_limit param;
+
+	if (!dev_name) {
+		pr_err("null dev_name\n");
+		return -EINVAL;
+	}
+	if (!min_freq && !max_freq) {
+		pr_debug("no job\n");
+		return 0;
+	}
+	if (min_freq && max_freq && min_freq > max_freq)
+		min_freq = max_freq;
+	pr_debug("%s,%lu,%lu\n", dev_name, max_freq, min_freq);
+
+	param.dev_name = dev_name; /* the beginning of the device name of the operation target */
+	param.dev_name_len = strlen(dev_name);
+	param.max_freq = max_freq; /* specify 0 if don't write */
+	param.min_freq = min_freq; /* specify 0 if don't write */
+
+	ret = class_for_each_device(devfreq_class, NULL, &param, __devfreq_set_limit_freq_dev);
+
+	pr_debug("ret %d\n", ret);
+	return ret;
+}
 
 /**
  * devfreq_register_notifier() - Register a driver with devfreq

@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Red Hat, Inc.
@@ -12,12 +15,32 @@
  * are on the same disk on different partitions on devices with poor random
  * access behavior.
  */
+/*==========================================================================
+                  EDIT HISTORY FOR FILE BY FCNT Security
+
+when       who     what, where, why
+--------   ---     ---------------------------------------------------------
+
+12/13/19   fcnt    dm-verity verity error block log add REQSYS-Security-02512-AVB/Verity
+===========================================================================*/
 
 #include "dm-verity.h"
 #include "dm-verity-fec.h"
 
 #include <linux/module.h>
 #include <linux/reboot.h>
+
+#if defined(FJ_PRODUCT_RELEASE) || \
+	defined(FJFEAT_AIRMONKEY) || \
+	defined(FJSEC_BLDFLG)
+
+#include <linux/sched.h>
+#include <asm/memory.h>
+#include <linux/spinlock.h>
+static DEFINE_SPINLOCK(dump_lock);
+
+#endif /* defined(FJ_PRODUCT_RELEASE) || defined(FJFEAT_AIRMONKEY) || defined(FJSEC_BLDFLG)*/
+
 
 #define DM_MSG_PREFIX			"verity"
 
@@ -45,6 +68,50 @@ struct dm_verity_prefetch_work {
 	sector_t block;
 	unsigned n_blocks;
 };
+
+#if defined(FJ_PRODUCT_RELEASE) || \
+    defined(FJFEAT_AIRMONKEY) || \
+    defined(FJSEC_BLDFLG)
+
+#define VERITY_COMMANDLINE_PARAM_LENGTH 20
+#define VERITYMODE_ENFORCING "enforcing"
+
+static char veritymode[VERITY_COMMANDLINE_PARAM_LENGTH];
+
+static int __init verity_mode_param(char *line)
+{
+    strlcpy(veritymode, line, sizeof(veritymode));
+    return 1;
+}
+
+__setup("androidboot.veritymode=", verity_mode_param);
+
+#define get_block_size(block_bit) (1 << block_bit)
+
+static void dump_data_block(u8 *addr, unsigned block_size)
+{
+	char *block_data = addr;
+	int  log_i;
+	u64  phys_adr;
+	unsigned long flags;
+
+	if (addr == NULL)
+		return;
+	spin_lock_irqsave(&dump_lock, flags);
+	phys_adr = (u64)virt_to_phys(addr);
+	DMERR("physadr: 0x%llx, cpu_id: %d, pid:%d, tid: %d", phys_adr, raw_smp_processor_id(), current->pid, current->tgid);
+
+	for(log_i=0; log_i < block_size; log_i+=16){
+			DMERR("corrupted data block dump: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x", 
+				block_data[log_i]     , block_data[log_i + 1] , block_data[log_i + 2] , block_data[log_i + 3], 
+				block_data[log_i + 4] , block_data[log_i + 5] , block_data[log_i + 6] , block_data[log_i + 7], 
+				block_data[log_i + 8] , block_data[log_i + 9] , block_data[log_i + 10], block_data[log_i + 11], 
+				block_data[log_i + 12], block_data[log_i + 13], block_data[log_i + 14], block_data[log_i + 15]);
+	}
+	spin_unlock_irqrestore(&dump_lock, flags);
+	return;
+}
+#endif /* defined(FJ_PRODUCT_RELEASE) || defined(FJFEAT_AIRMONKEY) || defined(FJSEC_BLDFLG)*/
 
 /*
  * Auxiliary structure appended to each dm-bufio buffer. If the value
@@ -311,11 +378,20 @@ static int verity_verify_level(struct dm_verity *v, struct dm_verity_io *io,
 					   DM_VERITY_BLOCK_TYPE_METADATA,
 					   hash_block, data, NULL) == 0)
 			aux->hash_verified = 1;
-		else if (verity_handle_err(v,
-					   DM_VERITY_BLOCK_TYPE_METADATA,
-					   hash_block)) {
-			r = -EIO;
-			goto release_ret_r;
+		else {
+#if defined(FJ_PRODUCT_RELEASE) || \
+	defined(FJFEAT_AIRMONKEY) || \
+	defined(FJSEC_BLDFLG)
+			if (!strncmp(veritymode, VERITYMODE_ENFORCING, sizeof(VERITYMODE_ENFORCING))) {
+				dump_data_block(data, get_block_size(v->hash_dev_block_bits));
+			}
+#endif /* defined(FJ_PRODUCT_RELEASE) || defined(FJFEAT_AIRMONKEY) || defined(FJSEC_BLDFLG)*/
+			if (verity_handle_err(v,
+						  DM_VERITY_BLOCK_TYPE_METADATA,
+						  hash_block)) {
+				r = -EIO;
+				goto release_ret_r;
+			}
 		}
 	}
 
@@ -429,6 +505,10 @@ int verity_for_bv_block(struct dm_verity *v, struct dm_verity_io *io,
 		struct bio_vec bv = bio_iter_iovec(bio, *iter);
 
 		page = kmap_atomic(bv.bv_page);
+		if( !page ) {
+			DMERR("kmap_atomic failed");
+			return -ENOMEM;
+		}
 		len = bv.bv_len;
 
 		if (likely(len >= todo))
@@ -477,7 +557,13 @@ static int verity_verify_io(struct dm_verity_io *io)
 	unsigned b;
 	struct crypto_wait wait;
 	struct bio *bio = dm_bio_from_per_bio_data(io, v->ti->per_io_data_size);
-
+#if defined(FJ_PRODUCT_RELEASE) || \
+	defined(FJFEAT_AIRMONKEY) || \
+	defined(FJSEC_BLDFLG)
+//	u8   *log_page;
+	struct bio_vec *log_iter;
+	unsigned int index;
+#endif /* defined(FJ_PRODUCT_RELEASE) || defined(FJFEAT_AIRMONKEY) || defined(FJSEC_BLDFLG)*/
 	for (b = 0; b < io->n_blocks; b++) {
 		int r;
 		sector_t cur_block = io->block + b;
@@ -511,7 +597,11 @@ static int verity_verify_io(struct dm_verity_io *io)
 		r = verity_hash_init(v, req, &wait);
 		if (unlikely(r < 0))
 			return r;
-
+#if defined(FJ_PRODUCT_RELEASE) || \
+    defined(FJFEAT_AIRMONKEY) || \
+    defined(FJSEC_BLDFLG)
+		index = io->iter.bi_idx;
+#endif /* defined(FJ_PRODUCT_RELEASE) || defined(FJFEAT_AIRMONKEY) || defined(FJSEC_BLDFLG)*/
 		start = io->iter;
 		r = verity_for_io_block(v, io, &io->iter, &wait);
 		if (unlikely(r < 0))
@@ -532,6 +622,22 @@ static int verity_verify_io(struct dm_verity_io *io)
 					   cur_block, NULL, &start) == 0)
 			continue;
 		else {
+#if defined(FJ_PRODUCT_RELEASE) || \
+	defined(FJFEAT_AIRMONKEY) || \
+	defined(FJSEC_BLDFLG)
+			if (!strncmp(veritymode, VERITYMODE_ENFORCING, sizeof(VERITYMODE_ENFORCING))) {
+				u8 *page;
+				struct bio *bio = dm_bio_from_per_bio_data(io, v->ti->per_io_data_size);
+				log_iter = bio->bi_io_vec + index;
+				page = kmap_atomic(log_iter->bv_page);
+				if( !page ) {
+					DMERR("kmap_atomic for dump failed. no dump.");
+				} else {
+					dump_data_block(page, get_block_size(v->data_dev_block_bits));
+					kunmap_atomic(page);
+				}
+			}
+#endif /* defined(FJ_PRODUCT_RELEASE) || defined(FJFEAT_AIRMONKEY) || defined(FJSEC_BLDFLG)*/
 			if (bio->bi_status) {
 				/*
 				 * Error correction failed; Just return error

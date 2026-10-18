@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
@@ -831,6 +834,13 @@ int fg_restart(struct fg_dev *fg, int wait_time_ms)
 	}
 
 	fg->last_soc = pval.intval;
+	rc = power_supply_get_property(fg->fg_psy, POWER_SUPPLY_PROP_MSOC_RAW,
+					&pval);
+	if (rc < 0) {
+		pr_err("Error in getting msoc_raw, rc=%d\n", rc);
+		return rc;
+	}
+	fg->last_msoc_raw = pval.intval;
 	fg->fg_restarting = true;
 	reinit_completion(&fg->soc_ready);
 	rc = fg_masked_write(fg, BATT_SOC_RESTART(fg), RESTART_GO_BIT,

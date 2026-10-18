@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
@@ -186,6 +189,7 @@ static bool get_dload_mode(void)
 	return dload_mode_enabled;
 }
 
+#if 0
 static void enable_emergency_dload_mode(void)
 {
 	int ret;
@@ -212,6 +216,7 @@ static void enable_emergency_dload_mode(void)
 	if (ret)
 		pr_err("Failed to set secure EDLOAD mode: %d\n", ret);
 }
+#endif
 
 static int dload_set(const char *val, const struct kernel_param *kp)
 {
@@ -473,13 +478,15 @@ static void msm_restart_prepare(const char *cmd)
 	 */
 
 	set_dload_mode(download_mode &&
-			(in_panic || restart_mode == RESTART_DLOAD));
+			(((cmd != NULL && cmd[0] != '\0') && (
+				!strncmp(cmd, "warm", 4) ||
+				!strcmp(cmd, "dm-verity device corrupted") ||
+				!strncmp(cmd, "SIM is added.", 13)
+			)) || (in_panic || restart_mode == RESTART_DLOAD)));
 
 	if (qpnp_pon_check_hard_reset_stored()) {
 		/* Set warm reset as true when device is in dload mode */
-		if (get_dload_mode() ||
-			((cmd != NULL && cmd[0] != '\0') &&
-			!strcmp(cmd, "edl")))
+		if (get_dload_mode())
 			need_warm_reset = true;
 	} else {
 		need_warm_reset = (get_dload_mode() ||
@@ -504,10 +511,12 @@ static void msm_restart_prepare(const char *cmd)
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RECOVERY);
 			__raw_writel(0x77665502, restart_reason);
+#if 0
 		} else if (!strcmp(cmd, "rtc")) {
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RTC);
 			__raw_writel(0x77665503, restart_reason);
+#endif
 		} else if (!strcmp(cmd, "dm-verity device corrupted")) {
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_DMVERITY_CORRUPTED);
@@ -520,6 +529,7 @@ static void msm_restart_prepare(const char *cmd)
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_KEYS_CLEAR);
 			__raw_writel(0x7766550a, restart_reason);
+#if 0
 		} else if (!strncmp(cmd, "oem-", 4)) {
 			unsigned long code;
 			int ret;
@@ -530,9 +540,57 @@ static void msm_restart_prepare(const char *cmd)
 					     restart_reason);
 		} else if (!strncmp(cmd, "edl", 3)) {
 			enable_emergency_dload_mode();
+#endif
+		} else if (!strncmp(cmd, "user space request", 18)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_USER_SPACE_REQUEST);
+			__raw_writel(0x6f656d00, restart_reason);
+		} else if (!strncmp(cmd, "offcharge", 9)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_OFFCHARGE);
+			__raw_writel(0x6f656d01, restart_reason);
+		} else if (!strncmp(cmd, "forcenormal", 11)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_FORCENORMAL);
+			__raw_writel(0x6f656d02, restart_reason);
+		} else if (!strncmp(cmd, "User's request", 14) ||
+					!strncmp(cmd, "userrequested", 13)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_USERS_REQUEST);
+			__raw_writel(0x6f656d03, restart_reason);
+		} else if (!strncmp(cmd, "SIM is added.", 13)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_SIM_IS_ADDED);
+			__raw_writel(0x6f656d06, restart_reason);
+		} else if (!strncmp(cmd, "selinux-permissive", 18)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_SELINUX_PERMISSIVE);
+			__raw_writel(0x6f656d10, restart_reason);
+		} else if (!strncmp(cmd, "selinux-enforcing", 17)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_SELINUX_ENFORCING);
+			__raw_writel(0x6f656d11, restart_reason);
+		} else if (!strncmp(cmd, "lsm-permissive", 14)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_LSM_PERMISSIVE);
+			__raw_writel(0x6f656d12, restart_reason);
+		} else if (!strncmp(cmd, "lsm-enforcing", 13)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_LSM_ENFORCING);
+			__raw_writel(0x6f656d13, restart_reason);
+		} else if (!strncmp(cmd, "lsm-off", 7)) {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_LSM_OFF);
+			__raw_writel(0x6f656d14, restart_reason);
 		} else {
+			qpnp_pon_set_restart_reason(
+				PON_RESTART_REASON_OTHER_REQUEST1);
 			__raw_writel(0x77665501, restart_reason);
 		}
+	} else {
+		qpnp_pon_set_restart_reason(
+			PON_RESTART_REASON_OTHER_REQUEST2);
+		__raw_writel(0x77665501, restart_reason);
 	}
 
 	flush_cache_all();

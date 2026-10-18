@@ -1,3 +1,6 @@
+/*----------------------------------------------------------------------------*/
+/* (C) 2021 FCNT LIMITED              */
+/*----------------------------------------------------------------------------*/
 /*
  *  linux/drivers/mmc/core/host.c
  *
@@ -32,6 +35,7 @@
 #include "slot-gpio.h"
 #include "pwrseq.h"
 #include "sdio_ops.h"
+#include "cmdlog.h" 
 
 #define cls_dev_to_mmc_host(d)	container_of(d, struct mmc_host, class_dev)
 
@@ -634,6 +638,63 @@ static int mmc_validate_host_caps(struct mmc_host *host)
 	return 0;
 }
 
+static ssize_t mmc_speed_change_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct mmc_host *host = cls_dev_to_mmc_host(dev);
+	ssize_t ret = 0;
+
+	if ((!host) || (!host->card))
+		return ret;
+
+	if (mmc_card_uhs(host->card) || (MMC_POWER_OFF==host->ios.power_mode && mmc_host_uhs(host))) {
+		if (host->card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR104)
+			ret += sprintf(buf + ret, "SDR104 ");
+		if (host->card->sw_caps.sd3_bus_mode & SD_MODE_UHS_DDR50)
+			ret += sprintf(buf + ret, "DDR50 ");
+		if (host->card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR50)
+			ret += sprintf(buf + ret, "SDR50 ");
+		if (host->card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR25)
+			ret += sprintf(buf + ret, "SDR25 ");
+		if (host->card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR12)
+			ret += sprintf(buf + ret, "SDR12 ");
+	}
+	if (host->card->sw_caps.hs_max_dtr)
+		ret += sprintf(buf + ret, "HS ");
+
+	ret += sprintf(buf + ret, "DS\n");
+
+	return ret;
+}
+
+static ssize_t mmc_speed_change_store(struct device *dev,
+		struct device_attribute *attr, const char *data, size_t len)
+{
+	struct mmc_host *host = cls_dev_to_mmc_host(dev);
+
+	if ((!host) || (!host->card))
+		return len;
+
+	if (!strncmp(data, "1", 1)) {
+		mmc_down_speed_mode(host);
+	}
+
+	return len;
+}
+
+static DEVICE_ATTR(speed_change,  S_IRUGO | S_IWUSR, mmc_speed_change_show, mmc_speed_change_store);
+
+static void mmc_speed_change_init(struct mmc_host *host)
+{
+	if (mmc_host_get_type(host) == HOST_TYPE_SD) {
+		if (device_create_file(&host->class_dev, &dev_attr_speed_change))
+			pr_err("%s: Failed to create speed_change sysfs entry\n",
+					mmc_hostname(host));
+	}
+
+	return;
+}
+
 /**
  *	mmc_add_host - initialise host hardware
  *	@host: mmc host
@@ -671,6 +732,10 @@ int mmc_add_host(struct mmc_host *host)
 	if (!host->ipc_log_ctxt)
 		pr_err("%s: Error getting ipc_log_ctxt\n", __func__);
 #endif
+
+	mmc_cmdlog_sysfs_init(host); 
+	mmc_cmdlog_dump_init(host);  
+	mmc_speed_change_init(host); 
 
 	err = sysfs_create_group(&host->class_dev.kobj, &clk_scaling_attr_grp);
 	if (err)

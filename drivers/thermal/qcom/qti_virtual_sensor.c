@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
+/*----------------------------------------------------------------------------*/
+// (C) 2021 FCNT LIMITED
+/*----------------------------------------------------------------------------*/
 /*
  * Copyright (c) 2017-2019,2021, The Linux Foundation. All rights reserved.
  */
@@ -182,6 +185,19 @@ static const struct virtual_sensor_data qti_virtual_sensors[] = {
 				"apc1-cpu3-usr",
 				"cpuss-usr"},
 		.logic = VIRT_MAXIMUM,
+	},
+	{
+		.virt_zone_name = "failure-det-min-usr",
+		.num_sensors = 8,
+		.sensor_names = {"skin-msm-therm-usr",
+				"skin-therm-usr",
+				"modem-lte-sub6-pa1",
+				"modem-lte-sub6-pa2",
+				"mmw-pa2-usr",
+				"mmw-pa1-usr",
+				"qtm-right-therm-usr",
+				"conn-therm-usr"},
+		.logic = VIRT_MINIMUM,
 	},
 };
 
